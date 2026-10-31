@@ -37,6 +37,10 @@ Parameters:
     Default: ''
     NoEcho: true
 
+  BudgetEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+$'
+    Description: Address for the USD 5 per month budget alarm (design D8). scripts/deploy.sh reads it from SSM, so it never sits in this public repo.
   EnableSmokeTestAuth:
     Type: String
     Default: 'false'
@@ -338,6 +342,22 @@ Resources:
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
+
+  # Cost guard (design D8). AWS Budgets track the whole account, not only this stack.
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly-usd-5'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: 5, Unit: USD }
+      NotificationsWithSubscribers:
+        # Mail once spend passes USD 5, and earlier if the month is forecast to pass it.
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
 
   # One HTTP API. A token from the wrong pool fails the issuer and audience check, so it gets 401 before any Lambda runs (design D3).
   Api:
