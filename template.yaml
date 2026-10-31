@@ -37,6 +37,14 @@ Parameters:
     Default: ''
     NoEcho: true
 
+  QrKeyVersion:
+    Type: String
+    Default: '1'
+    Description: SSM version of the QR key. scripts/deploy.sh passes it on, so a key rotation changes the functions' configuration and replaces every warm container.
+  BudgetEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+$'
+    Description: Address for the USD 5 per month budget alarm (design D8). scripts/deploy.sh reads it from SSM, so it never sits in this public repo.
   EnableSmokeTestAuth:
     Type: String
     Default: 'false'
@@ -319,8 +327,10 @@ Resources:
           RequireNumbers: true
           RequireSymbols: false
           TemporaryPasswordValidityDays: 7
+      # Not required: Cognito makes a client able to write every required attribute, and merchants must not change their
+      # login email. AdminCreateUser always sets it (merchantCreate requires email), and there is no self sign-up.
       Schema:
-        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+        - { Name: email, AttributeDataType: String, Required: false, Mutable: true }
 
   MerchantAppClient:
     Type: AWS::Cognito::UserPoolClient
@@ -338,6 +348,23 @@ Resources:
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
+
+  # Cost guard (design D8). AWS Budgets track the whole account, not only this stack.
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        # Budgets are account-wide, so the name is too: a second stack fails loudly instead of adding a duplicate alarm.
+        BudgetName: localbargain-monthly-usd-5
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: 5, Unit: USD }
+      NotificationsWithSubscribers:
+        # Mail once spend passes USD 5, and earlier if the month is forecast to pass it.
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
 
   # One HTTP API. A token from the wrong pool fails the issuer and audience check, so it gets 401 before any Lambda runs (design D3).
   Api:
@@ -486,6 +513,7 @@ Resources:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
           CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
           QR_KEY: ''
+          QR_KEY_VERSION: !Ref QrKeyVersion
       Policies:
         - Statement:
             # AdminGetUser or ListUsers finds the consumer by sub (federated usernames differ from the sub). DELETE /me then
@@ -601,6 +629,7 @@ Resources:
           IMAGE_BUCKET: !Ref ImageBucket
           CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
           QR_KEY: ''
+          QR_KEY_VERSION: !Ref QrKeyVersion
           S3_ENDPOINT: ''
           S3_PUBLIC_ENDPOINT: ''
           S3_ACCESS_KEY_ID: ''

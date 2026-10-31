@@ -53,7 +53,39 @@ aws ssm put-parameter \
   --value "$(openssl rand -base64 32)"
 ```
 
-Rotating the key invalidates every QR value already issued. Each function reads the key once per cold start, so after `aws ssm put-parameter --overwrite` you must redeploy (`sam deploy`). Otherwise warm containers keep signing or verifying with the old key, and scans fail at random until every container recycles. After the redeploy, the consumer app gets a valid value the next time it fetches the QR code.
+Rotating the key invalidates every QR value already issued. Each function reads the key once per cold start, so after `aws ssm put-parameter --overwrite` run `scripts/deploy.sh`. It passes the key's new SSM version to the functions as `QR_KEY_VERSION`, which replaces every warm container. Without that, warm containers keep signing or verifying with the old key, and scans fail at random until every container recycles. After the deploy, the consumer app gets a valid value the next time it fetches the QR code.
+
+### Deploying
+
+First, once per account, deploy `bootstrap.yaml` with an identity that can manage IAM and CloudFormation:
+
+```sh
+aws cloudformation deploy --region ap-southeast-2 --stack-name localbargain-bootstrap \
+  --template-file bootstrap.yaml --capabilities CAPABILITY_NAMED_IAM
+```
+
+It creates the CloudFormation service role `localbargain-cfn-deploy`, which the app stack deploys as, so the deploying user needs no rights on Lambda, DynamoDB, Cognito, CloudFront or Budgets. It also attaches the `localbargain-deployer` policy to the IAM user `local_bargain` (parameter `DeployerUserName`). That policy covers what runs outside CloudFormation: passing the role, the SSM parameters, the artifact bucket `localbargain-artifacts-<account>-ap-southeast-2`, the admin script, and the smoke tests. The policy also lets the user change and delete the app stack, so besides it the user needs only `AWSCloudFormationReadOnlyAccess`. Updating `bootstrap.yaml` itself still needs an identity that can manage IAM.
+
+> **Warning:** whoever can update the app stack can give a function role any permission through the service role, so stack update rights are close to admin rights in this account. Grant them only to people you would trust with admin.
+
+Always deploy with `scripts/deploy.sh`, never a plain `sam deploy`. The script reads its parameters from SSM under `/localbargain/dev`, so no secrets or personal data sit in this public repository:
+
+| Parameter | Type | |
+|---|---|---|
+| `qr-key` | SecureString | required, see above |
+| `budget-email` | String | required, the address for the USD 5 per month budget alarm |
+| `google-client-id`, `google-client-secret` | String, SecureString | optional, set both or neither |
+| `apple-services-id`, `apple-team-id`, `apple-key-id`, `apple-private-key` | String (last one SecureString) | optional, set all four or none |
+
+```sh
+aws ssm put-parameter --region ap-southeast-2 --name /localbargain/dev/budget-email --type String --value "you@example.com"
+scripts/deploy.sh                  # build, package, create a change set, and execute it
+REVIEW_ONLY=1 scripts/deploy.sh    # create the change set and stop, so you can inspect it first
+```
+
+The script passes the values in a private file (mode 600, deleted on exit), not on the command line, so secrets never show in the process list. It refuses to deploy when the stack already has a Google or Apple provider whose parameters are missing from SSM, because CloudFormation would delete the provider and still report success. A first deploy with `REVIEW_ONLY=1` leaves the stack in `REVIEW_IN_PROGRESS`. Delete that stack, or run the script again without the flag.
+
+The budget alarm (`localbargain-monthly-usd-5`) emails when actual spend passes USD 5 in a month, and earlier when the month's forecast does. AWS Budgets track the whole account, not only this stack.
 
 ### Deleting the stack
 
@@ -67,9 +99,9 @@ aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name <stack> --quer
 
 The consumer user pool uses the **Lite** feature tier, which is set explicitly because new pools default to Essentials. Lite is the lowest tier that supports the classic hosted UI and Google and Apple sign-in. It includes 10,000 monthly active users (MAU) free per account, then costs from USD 0.0055 per MAU (Essentials costs USD 0.015). Google and Apple users count as normal MAUs. Pools created on or before 22 November 2024 keep a legacy free tier of 50,000 MAU.
 
-Google and Apple sign-in are optional. If `GoogleClientId`/`GoogleClientSecret`, or all four `Apple*` parameters, are left empty, that provider is not created, and email and password sign-in still works. A provider that is only half configured fails the deploy (template `Rules`). `scripts/deploy.sh` (task 8.1) reads the secrets from SSM.
+Google and Apple sign-in are optional. If `GoogleClientId`/`GoogleClientSecret`, or all four `Apple*` parameters, are left empty, that provider is not created, and email and password sign-in still works. `scripts/deploy.sh` refuses a provider that is only half configured. The template's `Rules` are not enough on their own: a change set that set only `GoogleClientId` went through with "No updates are to be performed". `scripts/deploy.sh` reads the secrets from SSM (see Deploying).
 
-> **Warning:** a deploy without the federation parameters deletes any Google or Apple provider that already exists, and the deploy still succeeds. Always deploy through `scripts/deploy.sh`, not a plain `sam deploy`.
+> **Warning:** a deploy without the federation parameters deletes any Google or Apple provider that already exists, and the deploy still succeeds. `scripts/deploy.sh` refuses such a deploy.
 
 Both pools send email with Cognito's default sender, which allows about 50 emails per day per account. That covers verification codes, password resets, and merchant invitations. It is enough for testing. Switch to Amazon SES before a public launch.
 
