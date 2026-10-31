@@ -1,0 +1,5 @@
+extends:
+  - recommended
+rules:
+  # The only server is local mode, which is localhost by design.
+  no-server-example.com: off
