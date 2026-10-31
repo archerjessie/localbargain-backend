@@ -61,3 +61,8 @@ export async function merchantProfileExists(merchantId: string): Promise<boolean
   const { Item } = await dynamoClient().send(new GetCommand({ TableName: tableName(), Key: profileKey(merchantId), ProjectionExpression: 'PK' }));
   return Item !== undefined;
 }
+
+export async function getMerchantProfile(merchantId: string): Promise<MerchantProfile | undefined> {
+  const { Item } = await dynamoClient().send(new GetCommand({ TableName: tableName(), Key: profileKey(merchantId) }));
+  return Item ? profileFromItem(Item) : undefined;
+}
