@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handler } from '../../src/handlers/discovery.js';
 import { categories } from '../../src/reference/categories.js';
+import { expectContract } from '../support/contract.js';
 import { apiEvent, bodyOf } from '../support/events.js';
 
 const consumer = { sub: 'consumer-1' };
@@ -10,6 +11,7 @@ describe('GET /categories', () => {
     const response = await handler(apiEvent('GET /categories'));
     expect(response.statusCode).toBe(200);
     expect(bodyOf(response)).toEqual({ items: categories });
+    expectContract('GET', '/categories', 200, bodyOf(response));
   });
 });
 
@@ -17,6 +19,7 @@ describe('GET /locations', () => {
   it('finds the localities of postcode 3121, with coordinates', async () => {
     const response = await handler(apiEvent('GET /locations', { ...consumer, query: { q: '3121' } }));
     expect(response.statusCode).toBe(200);
+    expectContract('GET', '/locations', 200, bodyOf(response));
     const items = bodyOf(response).items as { suburb: string; state: string; postcode: string; lat: number; lng: number }[];
     expect(items.length).toBeGreaterThan(0);
     expect(items.every((l) => l.postcode === '3121' && l.state === 'VIC')).toBe(true);

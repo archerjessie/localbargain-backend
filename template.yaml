@@ -376,6 +376,9 @@ Resources:
         Target: es2023
         # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
         Minify: false
+        # The bundled AWS SDK is CommonJS and calls require(), which an ESM bundle lacks unless we create it.
+        Banner:
+          - "js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
         EntryPoints: [src/handlers/discovery.ts]
     Properties:
       CodeUri: ./
@@ -436,6 +439,9 @@ Resources:
         Target: es2023
         # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
         Minify: false
+        # The bundled AWS SDK is CommonJS and calls require(), which an ESM bundle lacks unless we create it.
+        Banner:
+          - "js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
         EntryPoints: [src/handlers/consumer.ts]
     Properties:
       CodeUri: ./
@@ -514,6 +520,9 @@ Resources:
         Target: es2023
         # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
         Minify: false
+        # The bundled AWS SDK is CommonJS and calls require(), which an ESM bundle lacks unless we create it.
+        Banner:
+          - "js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
         EntryPoints: [src/handlers/merchant.ts]
     Properties:
       CodeUri: ./
@@ -624,6 +633,9 @@ Resources:
         Target: es2023
         # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
         Minify: false
+        # The bundled AWS SDK is CommonJS and calls require(), which an ESM bundle lacks unless we create it.
+        Banner:
+          - "js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
         EntryPoints: [src/handlers/admin.ts]
     Properties:
       CodeUri: ./

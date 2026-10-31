@@ -43,6 +43,13 @@ export function s3PresignClient(): S3Client {
   return s3Presign;
 }
 
+// Fail fast: an empty base would turn imageUrl into a bare key that no client can load.
+export function imageBaseUrl(): string {
+  const url = env('IMAGE_BASE_URL');
+  if (!url) throw new Error('IMAGE_BASE_URL is not set');
+  return url;
+}
+
 export function tableName(): string {
   const name = env('TABLE_NAME');
   if (!name) throw new Error('TABLE_NAME is not set');
