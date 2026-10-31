@@ -21,6 +21,7 @@ export interface Identity {
   getConsumer(sub: string): Promise<Consumer | null>;
   deleteConsumer(sub: string): Promise<void>;
   createMerchant(email: string): Promise<string>;
+  findMerchantSub(email: string): Promise<string | null>;
   deleteMerchant(sub: string): Promise<void>;
 }
 
@@ -92,6 +93,16 @@ export function cognitoIdentity(
       }
     },
 
+    async findMerchantSub(email) {
+      try {
+        const user = await client.send(new AdminGetUserCommand({ UserPoolId: pools.merchantPoolId, Username: email }));
+        return attribute(user.UserAttributes, 'sub') ?? null;
+      } catch (error) {
+        if (error instanceof UserNotFoundException) return null;
+        throw error;
+      }
+    },
+
     async deleteMerchant(sub) {
       try {
         // Email-as-username pools give each user a username equal to its sub.
@@ -112,6 +123,9 @@ export const fixtureIdentity: Identity = {
   async deleteConsumer() {},
   async createMerchant() {
     throw new Error('Admin routes are not used in local mode; seed-local.ts writes merchants directly');
+  },
+  async findMerchantSub() {
+    return null;
   },
   async deleteMerchant() {},
 };

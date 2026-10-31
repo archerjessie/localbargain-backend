@@ -1,6 +1,7 @@
 import {
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
+  AdminGetUserCommand,
   UsernameExistsException,
   type CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
@@ -21,15 +22,19 @@ const body = {
   postcode: '3000', lat: -37.8136, lng: 144.9631, email: 'Owner@Example.com',
 };
 
-function setup(opts: { cognito?: (command: unknown) => unknown; save?: (p: MerchantProfile) => Promise<void> } = {}) {
+function setup(
+  opts: { cognito?: (command: unknown) => unknown; save?: (p: MerchantProfile) => Promise<void>; profileExists?: boolean } = {},
+) {
   const send = vi.fn(async (command: unknown) =>
     opts.cognito ? opts.cognito(command) : { User: { Username: 'new-sub', Attributes: [{ Name: 'sub', Value: 'new-sub' }] } },
   );
   const client = { send } as unknown as CognitoIdentityProviderClient;
   const saveProfile = vi.fn(opts.save ?? (async () => {}));
+  const profileExists = vi.fn(async () => opts.profileExists ?? false);
   const route = createMerchantRoute({
     identity: cognitoIdentity(client, { consumerPoolId: 'c', merchantPoolId: 'merchant-pool' }),
     saveProfile,
+    profileExists,
     now: () => '2026-11-01T00:00:00.000Z',
   });
   // Through the router, which turns a thrown error into the 500 response.
@@ -51,16 +56,45 @@ describe('POST /admin/merchants', () => {
     });
   });
 
-  it('answers a duplicate login email with 409 and creates nothing', async () => {
-    const { call, saveProfile } = setup({
-      cognito: () => {
-        throw new UsernameExistsException({ message: 'exists', $metadata: {} });
-      },
-    });
+  const existingAccount = (command: unknown) => {
+    if (command instanceof AdminCreateUserCommand) throw new UsernameExistsException({ message: 'exists', $metadata: {} });
+    if (command instanceof AdminGetUserCommand) return { Username: 'old-sub', UserAttributes: [{ Name: 'sub', Value: 'old-sub' }] };
+    throw new Error('unexpected command');
+  };
+
+  it('answers a duplicate login email with 409 and creates nothing when that shop exists', async () => {
+    const { call, send, saveProfile } = setup({ cognito: existingAccount, profileExists: true });
     const response = await call();
     expect(response.statusCode).toBe(409);
     expectContract('POST', '/admin/merchants', 409, bodyOf(response));
     expect(saveProfile).not.toHaveBeenCalled();
+    expect(send.mock.calls.map(([c]) => c?.constructor.name)).toEqual(['AdminCreateUserCommand', 'AdminGetUserCommand']);
+  });
+
+  it('repairs an account left without a shop by an earlier failed create, so a retry succeeds', async () => {
+    const { call, saveProfile } = setup({ cognito: existingAccount, profileExists: false });
+    const response = await call();
+    expect(response.statusCode).toBe(201);
+    expect(bodyOf(response)).toEqual({ merchantId: 'old-sub' });
+    expect(saveProfile).toHaveBeenCalledWith(expect.objectContaining({ merchantId: 'old-sub', name: 'Bean There' }));
+  });
+
+  it('logs both errors and rethrows the write error when the rollback also fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { call } = setup({
+      cognito: (command) => {
+        if (command instanceof AdminDeleteUserCommand) throw new Error('Cognito throttled');
+        return { User: { Username: 'new-sub', Attributes: [{ Name: 'sub', Value: 'new-sub' }] } };
+      },
+      save: async () => {
+        throw new Error('DynamoDB unavailable');
+      },
+    });
+    expect((await call()).statusCode).toBe(500);
+    const logged = log.mock.calls.flat().map(String).join(' ');
+    expect(logged).toContain('Cognito throttled');
+    expect(logged).toContain('DynamoDB unavailable');
+    expect(logged).toContain('new-sub');
   });
 
   it('deletes the new account and answers 500 when the profile write fails', async () => {

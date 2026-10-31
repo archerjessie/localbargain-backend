@@ -1,4 +1,4 @@
-import { PutCommand, QueryCommand, type QueryCommandOutput } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, QueryCommand, type QueryCommandOutput } from '@aws-sdk/lib-dynamodb';
 import type { MerchantProfile, Offer } from '../domain/types.js';
 import { dynamoClient, tableName } from './clients.js';
 import { merchantProfileItem, offerFromItem, offerKey, profileFromItem, profileKey } from './items.js';
@@ -55,4 +55,9 @@ export async function putMerchantProfile(profile: MerchantProfile): Promise<void
   await dynamoClient().send(
     new PutCommand({ TableName: tableName(), Item: merchantProfileItem(profile), ConditionExpression: 'attribute_not_exists(PK)' }),
   );
+}
+
+export async function merchantProfileExists(merchantId: string): Promise<boolean> {
+  const { Item } = await dynamoClient().send(new GetCommand({ TableName: tableName(), Key: profileKey(merchantId), ProjectionExpression: 'PK' }));
+  return Item !== undefined;
 }

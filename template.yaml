@@ -657,10 +657,11 @@ Resources:
       Policies:
         - Statement:
             - Effect: Allow
-              Action: [cognito-idp:AdminCreateUser, cognito-idp:AdminDeleteUser]
+              # AdminGetUser finds the account a failed earlier create left behind, so a retry can repair it.
+              Action: [cognito-idp:AdminCreateUser, cognito-idp:AdminGetUser, cognito-idp:AdminDeleteUser]
               Resource: !GetAtt MerchantUserPool.Arn
             - Effect: Allow
-              Action: dynamodb:PutItem
+              Action: [dynamodb:GetItem, dynamodb:PutItem]
               Resource: !GetAtt Table.Arn
 
   DiscoveryLogGroup:
