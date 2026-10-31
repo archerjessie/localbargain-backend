@@ -420,7 +420,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '404':
-          description: The consumer account no longer exists (`consumer_not_found`)
+          description: The consumer account no longer exists (`consumer_not_found`), or this merchant account has no shop profile (`not_found`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

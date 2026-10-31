@@ -17,7 +17,7 @@ describe('snapshotRedemption', () => {
     expect(
       snapshotRedemption({
         redemptionId: 'r1', redeemedAt: '2026-11-01T10:00:00.000Z', merchant, offer,
-        consumer: { userId: 'local-consumer-1', displayName: 'Alex' },
+        consumer: { sub: 'local-consumer-1', displayName: 'Alex' },
       }),
     ).toEqual({
       redemptionId: 'r1', redeemedAt: '2026-11-01T10:00:00.000Z', merchantId: 'local-merchant-1', merchantName: 'Bean There',
@@ -26,21 +26,26 @@ describe('snapshotRedemption', () => {
     });
   });
 
+  it('leaves out an empty displayName too', () => {
+    const r = snapshotRedemption({ redemptionId: 'r1', redeemedAt: 't', merchant, offer, consumer: { sub: 'u', displayName: '' } });
+    expect(r).not.toHaveProperty('displayName');
+  });
+
   it('leaves out displayName when the consumer has none', () => {
-    const r = snapshotRedemption({ redemptionId: 'r1', redeemedAt: 't', merchant, offer, consumer: { userId: 'u' } });
+    const r = snapshotRedemption({ redemptionId: 'r1', redeemedAt: 't', merchant, offer, consumer: { sub: 'u' } });
     expect(r).not.toHaveProperty('displayName');
   });
 
   it('stays unchanged when the offer changes later', () => {
     const live = { ...offer };
-    const r = snapshotRedemption({ redemptionId: 'r1', redeemedAt: 't', merchant, offer: live, consumer: { userId: 'u' } });
+    const r = snapshotRedemption({ redemptionId: 'r1', redeemedAt: 't', merchant, offer: live, consumer: { sub: 'u' } });
     Object.assign(live, { productName: 'Latte', percentOff: 50, originalPriceCents: 600 });
     expect(r).toMatchObject({ productName: 'Flat white', percentOff: 15, originalPriceCents: 450, discountedPriceCents: 383 });
   });
 
   it('refuses an offer that belongs to another merchant', () => {
     expect(() => snapshotRedemption({
-      redemptionId: 'r1', redeemedAt: 't', merchant, offer: { ...offer, merchantId: 'local-merchant-2' }, consumer: { userId: 'u' },
+      redemptionId: 'r1', redeemedAt: 't', merchant, offer: { ...offer, merchantId: 'local-merchant-2' }, consumer: { sub: 'u' },
     })).toThrow();
   });
 });

@@ -5,7 +5,7 @@ import { createImageUpload, deleteImage, imageExists, imageKeyPrefix } from '../
 import { getMerchantProfile, merchantProfileExists } from '../data/merchants.js';
 import { deleteOffer, getOffer, listOffers, OfferChangedError, putOffer } from '../data/offers.js';
 import { qrKey } from '../data/qrKey.js';
-import { putRedemption } from '../data/redemptions.js';
+import { OfferUnavailableError, recordRedemption, removeRedemption } from '../data/redemptions.js';
 import { errorResponse } from '../domain/errors.js';
 import { verifyQr } from '../domain/qr.js';
 import { json, noContent } from '../domain/responses.js';
@@ -123,17 +123,26 @@ export const handler = router({
     if (!scanned) return errorResponse(400, 'invalid_qr', 'The QR value is malformed or its signature is wrong');
     // Looking in the scanning shop's own partition covers foreign, deleted, and deactivated offers in one check.
     const [offer, merchant] = await Promise.all([getOffer(caller.caller.sub, scanned.offerId), getMerchantProfile(caller.caller.sub)]);
-    if (!offer?.active || !merchant) return errorResponse(422, 'offer_unavailable', 'This offer is not an active offer of this shop');
+    if (!merchant) return errorResponse(404, 'not_found', 'No shop profile for this merchant account');
+    const unavailable = () => errorResponse(422, 'offer_unavailable', 'This offer is not an active offer of this shop');
+    if (!offer?.active) return unavailable();
+    const consumerGone = () => errorResponse(404, 'consumer_not_found', 'The consumer account no longer exists');
     const consumer = await identity().getConsumer(scanned.sub);
-    if (!consumer) return errorResponse(404, 'consumer_not_found', 'The consumer account no longer exists');
-    const redemption = snapshotRedemption({
-      redemptionId: randomUUID(),
-      redeemedAt: new Date().toISOString(),
-      merchant,
-      offer,
-      consumer: { userId: consumer.sub, ...(consumer.displayName ? { displayName: consumer.displayName } : {}) },
-    });
-    await putRedemption(redemption);
+    if (!consumer) return consumerGone();
+    const redemption = snapshotRedemption({ redemptionId: randomUUID(), redeemedAt: new Date().toISOString(), merchant, offer, consumer });
+    try {
+      await recordRedemption(redemption);
+    } catch (error) {
+      if (error instanceof OfferUnavailableError) return unavailable();
+      throw error;
+    }
+    // DELETE /me disables the account before anonymising (design D5). Looking again after the write catches a deletion
+    // that started during this scan, so no redemption stays linked to an account that is going away.
+    // Accepted risk: a deletion that starts after this second lookup and misses the new item in a lagging GSI1 read.
+    if (!(await identity().getConsumer(scanned.sub))) {
+      await removeRedemption(redemption);
+      return consumerGone();
+    }
     return json(201, merchantRedemptionView(redemption));
   },
 });

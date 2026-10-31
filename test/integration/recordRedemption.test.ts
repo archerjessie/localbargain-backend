@@ -1,7 +1,7 @@
 import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dynamoClient, tableName } from '../../src/data/clients.js';
-import { deleteOffer } from '../../src/data/offers.js';
+import { deleteOffer, getOffer, putOffer } from '../../src/data/offers.js';
 import { signQr } from '../../src/domain/qr.js';
 import { handler } from '../../src/handlers/merchant.js';
 import { expectContract } from '../support/contract.js';
@@ -11,13 +11,25 @@ import { createTestTable, merchantAt, putItems, testOffer } from './helpers.js';
 // Stubbed boundaries only: SSM (the key) and Cognito (consumer lookup).
 const key = Buffer.alloc(32, 5);
 vi.mock('../../src/data/qrKey.js', () => ({ qrKey: async () => key }));
+// Hooks let a test change the world in the middle of a scan, at the moment the consumer is looked up.
+const duringLookup: { hook: (() => Promise<void>) | undefined } = { hook: undefined };
+const gone = new Set<string>();
 const consumers: Record<string, { sub: string; displayName?: string }> = {
   'consumer-a': { sub: 'consumer-a', displayName: 'Alex' },
   'consumer-noname': { sub: 'consumer-noname' },
 };
 vi.mock('../../src/identity/identity.js', async (original) => ({
   ...(await original<typeof import('../../src/identity/identity.js')>()),
-  identity: () => ({ getConsumer: async (sub: string) => consumers[sub] ?? null }),
+  identity: () => ({
+    // The answer is fixed first, then the hook changes the world, as if it happened just after this lookup.
+    getConsumer: async (sub: string) => {
+      const answer = gone.has(sub) ? null : (consumers[sub] ?? null);
+      const hook = duringLookup.hook;
+      duringLookup.hook = undefined;
+      await hook?.();
+      return answer;
+    },
+  }),
 }));
 
 const shopA = { sub: 'shop-a' };
@@ -36,12 +48,15 @@ beforeAll(async () => {
   ({ drop } = await createTestTable());
   await putItems(
     [merchantAt('shop-a', { lat: -37.8136, lng: 144.9631 }, 0), merchantAt('shop-b', { lat: -37.8136, lng: 144.9631 }, 1)],
+    // shop-noprofile has an offer but no profile item.
     [
       testOffer('shop-a', 'flat-white', { productName: 'Flat white', percentOff: 15, originalPriceCents: 450 }),
       testOffer('shop-a', 'croissant', { productName: 'Croissant', categoryId: 'bakery', percentOff: 20, originalPriceCents: 500 }),
       testOffer('shop-a', 'paused', { active: false }),
       testOffer('shop-a', 'gone'),
       testOffer('shop-b', 'b-offer'),
+      testOffer('shop-a', 'paused-mid-scan'),
+      testOffer('shop-noprofile', 'orphan'),
     ],
   );
 });
@@ -61,7 +76,8 @@ describe('POST /merchant/redemptions', () => {
   });
 
   it('stores the snapshot with no payment fields, linked to the consumer through GSI1', async () => {
-    const stored = (await storedRedemptions()).find((r) => r.offerId === 'flat-white')!;
+    const { redemptionId } = bodyOf(await scan(qrFor('consumer-a', 'flat-white')));
+    const stored = (await storedRedemptions()).find((r) => r.redemptionId === redemptionId)!;
     expect(Object.keys(stored).sort()).toEqual([
       'GSI1PK', 'GSI1SK', 'PK', 'SK', 'categoryId', 'discountedPriceCents', 'displayName', 'merchantId', 'merchantName',
       'offerId', 'originalPriceCents', 'percentOff', 'productName', 'redeemedAt', 'redemptionId', 'userId',
@@ -79,7 +95,9 @@ describe('POST /merchant/redemptions', () => {
   });
 
   it('records displayName null when the consumer has no display name', async () => {
-    expect(bodyOf(await scan(qrFor('consumer-noname', 'flat-white'))).displayName).toBeNull();
+    const { redemptionId, displayName } = bodyOf(await scan(qrFor('consumer-noname', 'flat-white')));
+    expect(displayName).toBeNull();
+    expect((await storedRedemptions()).find((r) => r.redemptionId === redemptionId)).not.toHaveProperty('displayName');
   });
 
   const rejects = async (qrValue: unknown, status: number, code: string) => {
@@ -118,6 +136,42 @@ describe('POST /merchant/redemptions', () => {
 
   it('answers a consumer account that no longer exists with 404 and records nothing', async () => {
     await rejects(qrFor('consumer-deleted', 'flat-white'), 404, 'consumer_not_found');
+  });
+
+  it('checks the offer before the consumer (design D10): a foreign or inactive offer for a gone consumer is 422', async () => {
+    await rejects(qrFor('consumer-deleted', 'b-offer'), 422, 'offer_unavailable');
+    await rejects(qrFor('consumer-deleted', 'paused'), 422, 'offer_unavailable');
+  });
+
+  it('answers 422 and records nothing when the offer is deactivated during the scan', async () => {
+    duringLookup.hook = async () => {
+      const offer = (await getOffer('shop-a', 'paused-mid-scan'))!;
+      await putOffer({ ...offer, active: false, updatedAt: new Date().toISOString() }, { expectedUpdatedAt: offer.updatedAt });
+    };
+    await rejects(qrFor('consumer-a', 'paused-mid-scan'), 422, 'offer_unavailable');
+  });
+
+  it('answers 404 and records nothing when the consumer deletes their account during the scan', async () => {
+    consumers['consumer-leaving'] = { sub: 'consumer-leaving', displayName: 'Lee' };
+    let lookups = 0;
+    duringLookup.hook = async () => {
+      lookups++;
+      gone.add('consumer-leaving');
+    };
+    // The first lookup still sees the account; the second (after the write) finds it gone.
+    gone.delete('consumer-leaving');
+    const before = (await storedRedemptions()).length;
+    const response = await scan(qrFor('consumer-leaving', 'flat-white'));
+    expect(lookups).toBe(1);
+    expect(response.statusCode).toBe(404);
+    expect(bodyOf(response).code).toBe('consumer_not_found');
+    expect(await storedRedemptions()).toHaveLength(before);
+  });
+
+  it('answers 404 not_found for a merchant account with no shop profile', async () => {
+    const response = await scan(qrFor('consumer-a', 'orphan'), { sub: 'shop-noprofile' });
+    expect(response.statusCode).toBe(404);
+    expect(bodyOf(response).code).toBe('not_found');
   });
 
   it('answers 401 without a merchant caller', async () => {
