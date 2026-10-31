@@ -22,7 +22,8 @@ services:
       MINIO_DEFAULT_BUCKETS: localbargain-images:download
     ports: ['9000:9000', '9001:9001']
     healthcheck:
-      test: ['CMD', 'curl', '-sf', 'http://localhost:9000/minio/health/live']
+      # Healthy only once the bucket and its anonymous-read policy exist: an anonymous GET then says NoSuchKey, not NoSuchBucket.
+      test: ['CMD-SHELL', 'curl -s http://localhost:9000/localbargain-images/healthcheck | grep -q NoSuchKey']
       interval: 2s
       retries: 30
 
