@@ -8,7 +8,7 @@ The stack is defined in `template.yaml` (AWS SAM) and deployed to `ap-southeast-
 
 ### One-time setup: the QR signing key
 
-QR values are signed with a 32-byte HMAC key kept in SSM Parameter Store as a `SecureString`. This uses the standard tier and the AWS-managed KMS key, so it has no monthly cost. Only the `consumer` and `merchant` functions can read it. Create it once per account before the first deploy:
+QR values are signed with a 32-byte HMAC key kept in SSM Parameter Store as a `SecureString`. This uses the standard tier and the AWS-managed KMS key, so it has no monthly cost. Only the `consumer` and `merchant` functions can read it. The parameter holds the key **base64-encoded**, and the functions decode it back to 32 bytes. `local/env.json` uses the same encoding. Create it once per account before the first deploy:
 
 ```sh
 aws ssm put-parameter \
@@ -18,7 +18,15 @@ aws ssm put-parameter \
   --value "$(openssl rand -base64 32)"
 ```
 
-Rotating the key invalidates every QR value already issued. The apps fetch a new value when a scan returns `invalid_qr`.
+Rotating the key invalidates every QR value already issued. Each function reads the key once per cold start, so after `aws ssm put-parameter --overwrite` you must redeploy (`sam deploy`). Otherwise warm containers keep signing or verifying with the old key, and scans fail at random until every container recycles. After the redeploy, the consumer app gets a valid value the next time it fetches the QR code.
+
+### Deleting the stack
+
+`sam delete` removes the table and its data. Export the table first if the data matters. It also fails while the image bucket holds objects, so empty the bucket first:
+
+```sh
+aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].Outputs[?OutputKey=='ImageBucketName'].OutputValue" --output text)" --recursive
+```
 
 ### Product images and CloudFront
 

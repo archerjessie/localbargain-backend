@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && redocly lint openapi.yaml",
     "test": "vitest run --passWithNoTests",
-    "build": "sam build",
+    "build": "sam build --parallel --cached",
     "validate": "sam validate --lint"
   },
   "dependencies": {

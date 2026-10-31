@@ -7,7 +7,7 @@ export type Route = (event: APIGatewayProxyEventV2) => Promise<JsonResponse>;
 // Each Lambda serves one audience and dispatches on the HTTP API routeKey, for example "GET /discovery" (design D2).
 export function router(routes: Record<string, Route>) {
   return async (event: APIGatewayProxyEventV2): Promise<JsonResponse> => {
-    const route = routes[event.routeKey];
+    const route = Object.hasOwn(routes, event.routeKey) ? routes[event.routeKey] : undefined;
     if (!route) return errorResponse(404, 'not_found', `No route for ${event.routeKey}`);
     try {
       return await route(event);

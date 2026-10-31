@@ -17,6 +17,10 @@ describe('router', () => {
     expect(JSON.parse(response.body)).toMatchObject({ code: 'not_found' });
   });
 
+  it.each(['constructor', 'toString', '__proto__'])('does not treat inherited key %s as a route', async (routeKey) => {
+    expect((await router({})(event(routeKey))).statusCode).toBe(404);
+  });
+
   it('turns a thrown error into 500 internal_error without leaking the message', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const response = await router({ 'GET /boom': async () => { throw new Error('secret detail'); } })(event('GET /boom'));

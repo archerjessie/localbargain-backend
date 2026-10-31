@@ -7,7 +7,7 @@ Parameters:
     Type: String
     Default: /localbargain/dev/qr-key
     AllowedPattern: '^/[A-Za-z0-9/_.-]+$'
-    Description: SSM SecureString holding the 32-byte HMAC key for lb1 QR values (design D10). Create it once, see README.
+    Description: SSM SecureString holding the base64 encoding of the 32-byte HMAC key for lb1 QR values (design D10). Create it once, see README.
 
 Globals:
   Function:
@@ -18,13 +18,14 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: !Ref Table
-        IMAGE_BASE_URL: !Sub 'https://${ImageDistribution.DomainName}/'
-        NODE_OPTIONS: --enable-source-maps
 
 Resources:
   # Single table, on demand (design D5).
   Table:
     Type: AWS::DynamoDB::Table
+    # Keep the data if a template change would replace the table. sam delete still removes it (design rollback plan).
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
@@ -129,15 +130,17 @@ Resources:
         Format: esm
         OutExtension: [.js=.mjs]
         Target: es2023
-        Minify: true
-        Sourcemap: true
-        External: ['@aws-sdk/*']
+        # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
+        Minify: false
         EntryPoints: [src/handlers/discovery.ts]
     Properties:
       CodeUri: ./
       Handler: discovery.handler
       LoggingConfig:
         LogGroup: !Ref DiscoveryLogGroup
+      Environment:
+        Variables:
+          IMAGE_BASE_URL: !Sub 'https://${ImageDistribution.DomainName}/'
       Policies:
         - Statement:
             - Effect: Allow
@@ -154,9 +157,8 @@ Resources:
         Format: esm
         OutExtension: [.js=.mjs]
         Target: es2023
-        Minify: true
-        Sourcemap: true
-        External: ['@aws-sdk/*']
+        # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
+        Minify: false
         EntryPoints: [src/handlers/consumer.ts]
     Properties:
       CodeUri: ./
@@ -168,11 +170,20 @@ Resources:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
       Policies:
         - Statement:
+            # GetItem checks an offer before issuing a QR value. Query reads history from GSI1.
             - Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:UpdateItem]
-              Resource:
-                - !GetAtt Table.Arn
-                - !Sub '${Table.Arn}/index/GSI1'
+              Action: dynamodb:GetItem
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${Table.Arn}/index/GSI1'
+            # DELETE /me only removes the consumer link from redemptions (design D5), so UpdateItem may touch nothing else.
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt Table.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:Attributes: [PK, SK, userId, displayName, GSI1PK, GSI1SK]
             - Effect: Allow
               Action: ssm:GetParameter
               Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${QrKeyParameterName}'
@@ -185,9 +196,8 @@ Resources:
         Format: esm
         OutExtension: [.js=.mjs]
         Target: es2023
-        Minify: true
-        Sourcemap: true
-        External: ['@aws-sdk/*']
+        # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
+        Minify: false
         EntryPoints: [src/handlers/merchant.ts]
     Properties:
       CodeUri: ./
@@ -198,6 +208,7 @@ Resources:
         Variables:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
           IMAGE_BUCKET: !Ref ImageBucket
+          IMAGE_BASE_URL: !Sub 'https://${ImageDistribution.DomainName}/'
       Policies:
         - Statement:
             - Effect: Allow
@@ -219,9 +230,8 @@ Resources:
         Format: esm
         OutExtension: [.js=.mjs]
         Target: es2023
-        Minify: true
-        Sourcemap: true
-        External: ['@aws-sdk/*']
+        # Unminified with the SDK bundled: readable stack traces without source maps, and no reliance on the runtime SDK version.
+        Minify: false
         EntryPoints: [src/handlers/admin.ts]
     Properties:
       CodeUri: ./
