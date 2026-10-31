@@ -6,6 +6,7 @@ import {
   merchantCreate,
   offerCreate,
   offerUpdate,
+  parseJsonBody,
   parseRequest,
   redemptionCreate,
 } from '../../src/domain/validation.js';
@@ -29,7 +30,7 @@ function expect400(result: ReturnType<typeof parseRequest>) {
 
 describe('parseRequest', () => {
   it('returns the parsed data for a valid request', () => {
-    expect(parseRequest(offerCreate, validOffer)).toEqual({ ok: true, data: validOffer });
+    expect(parseRequest(offerCreate, validOffer)).toEqual({ ok: true, data: { ...validOffer, active: true } });
   });
 
   it('names the failing field in the message', () => {
@@ -39,6 +40,15 @@ describe('parseRequest', () => {
 });
 
 describe('offerCreate', () => {
+  it('defaults active to true', () => {
+    expect(parseRequest(offerCreate, validOffer)).toEqual({ ok: true, data: { ...validOffer, active: true } });
+  });
+
+  it('trims productName and rejects one that is only whitespace', () => {
+    expect(parseRequest(offerCreate, { ...validOffer, productName: '  Flat white ' })).toMatchObject({ data: { productName: 'Flat white' } });
+    expect400(parseRequest(offerCreate, { ...validOffer, productName: '   ' }));
+  });
+
   it.each([0, 100, 1.5, '20'])('rejects percentOff %j', (percentOff) => {
     expect400(parseRequest(offerCreate, { ...validOffer, percentOff }));
   });
@@ -87,7 +97,7 @@ describe('offerUpdate', () => {
     expect(parseRequest(offerUpdate, { imageKey: 'offers/m1/o1/3f2a.jpg' }).ok).toBe(true);
   });
 
-  it.each([{}, { percentOff: 100 }, { imageKey: '' }, { imageKey: 'elsewhere/a.jpg' }, { active: 'yes' }])(
+  it.each([{}, { percentOff: 100 }, { imageKey: '' }, { imageKey: 'elsewhere/a.jpg' }, { imageKey: 'offers/../o1/a.jpg' }, { imageKey: 'offers/m1/./a.jpg' }, { active: 'yes' }])(
     'rejects %j',
     (body) => expect400(parseRequest(offerUpdate, body)),
   );
@@ -118,6 +128,21 @@ describe('merchantCreate', () => {
     expect400(parseRequest(merchantCreate, { ...validMerchant, postcode }));
   });
 
+  it('trims and lowercases the email', () => {
+    expect(parseRequest(merchantCreate, { ...validMerchant, email: ' Owner@Example.COM ' })).toMatchObject({ data: { email: 'owner@example.com' } });
+  });
+
+  it.each(['name', 'street', 'suburb', 'email', 'lat'])('rejects a missing %s', (field) => {
+    const body: Record<string, unknown> = { ...validMerchant };
+    delete body[field];
+    expect400(parseRequest(merchantCreate, body));
+  });
+
+  it('rejects an unknown field and a whitespace-only name', () => {
+    expect400(parseRequest(merchantCreate, { ...validMerchant, geohash: 'r1r0fsnzv' }));
+    expect400(parseRequest(merchantCreate, { ...validMerchant, name: '  ' }));
+  });
+
   it('rejects an unknown shopType and an invalid email', () => {
     expect400(parseRequest(merchantCreate, { ...validMerchant, shopType: 'casino' }));
     expect400(parseRequest(merchantCreate, { ...validMerchant, email: 'not-an-email' }));
@@ -132,7 +157,8 @@ describe('discoveryQuery', () => {
   });
 
   it.each([
-    { lat: '91', lng: '144' }, { lat: '-91', lng: '144' }, { lat: '-37', lng: '181' }, { lat: '', lng: '144' },
+    { lat: '91', lng: '144' }, { lat: '-91', lng: '144' }, { lat: '-37', lng: '181' }, { lat: '-37', lng: '-181' }, { lat: '-37' },
+    { lat: '0x10', lng: '144' }, { lat: '1e1', lng: '144' }, { lat: '-37', lng: '144', radiusMetres: '0x10' }, { lat: '', lng: '144' },
     { lat: 'abc', lng: '144' }, { lng: '144' }, { lat: '-37', lng: '144', radiusMetres: '50001' },
     { lat: '-37', lng: '144', radiusMetres: '0' }, { lat: '-37', lng: '144', radiusMetres: '1.5' },
   ])('rejects %j', (query) => expect400(parseRequest(discoveryQuery, query)));
@@ -147,7 +173,7 @@ describe('locationsQuery', () => {
     expect(parseRequest(locationsQuery, { q: 'Ri' }).ok).toBe(true);
   });
 
-  it.each([{}, { q: '' }, { q: 'R' }, { q: ' R ' }])('rejects %j', (query) => {
+  it.each([{}, { q: '' }, { q: 'R' }, { q: ' R ' }, { q: ' '.repeat(10) + 'x'.repeat(60) }])('rejects %j', (query) => {
     expect400(parseRequest(locationsQuery, query));
   });
 });
@@ -159,5 +185,20 @@ describe('redemptionCreate', () => {
 
   it.each([{}, { qrValue: '' }, { qrValue: 42 }])('rejects %j', (body) => {
     expect400(parseRequest(redemptionCreate, body));
+  });
+});
+
+describe('parseJsonBody', () => {
+  it('parses a JSON body and validates it', () => {
+    expect(parseJsonBody(redemptionCreate, '{"qrValue":"lb1.a.b.c"}', false)).toEqual({ ok: true, data: { qrValue: 'lb1.a.b.c' } });
+  });
+
+  it('decodes a base64 body', () => {
+    const body = Buffer.from('{"qrValue":"x"}').toString('base64');
+    expect(parseJsonBody(redemptionCreate, body, true)).toEqual({ ok: true, data: { qrValue: 'x' } });
+  });
+
+  it.each([undefined, '', '{bad', 'null'])('answers body %j with 400 validation_error', (body) => {
+    expect400(parseJsonBody(redemptionCreate, body, false));
   });
 });

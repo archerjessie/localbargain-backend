@@ -648,10 +648,10 @@ components:
       additionalProperties: false
       required: [name, shopType, street, suburb, state, postcode, lat, lng, email]
       properties:
-        name: { type: string, minLength: 1, maxLength: 80 }
+        name: { type: string, minLength: 1, maxLength: 80, pattern: '\S' }
         shopType: { $ref: '#/components/schemas/ShopType' }
-        street: { type: string, minLength: 1, maxLength: 120 }
-        suburb: { type: string, minLength: 1, maxLength: 60 }
+        street: { type: string, minLength: 1, maxLength: 120, pattern: '\S' }
+        suburb: { type: string, minLength: 1, maxLength: 60, pattern: '\S' }
         state: { $ref: '#/components/schemas/State' }
         postcode: { $ref: '#/components/schemas/Postcode' }
         lat:
@@ -685,6 +685,8 @@ components:
       type: string
       minLength: 1
       maxLength: 80
+      pattern: '\S'
+      description: Leading and trailing whitespace is trimmed. Must contain a non-space character.
 
     Description:
       type: [string, 'null']
@@ -755,7 +757,7 @@ components:
       type: string
       description: '`offers/<merchantId>/<offerId>/<uuid>.<ext>`'
       minLength: 1
-      pattern: '^offers/[^/]+/[^/]+/[^/]+\.(jpg|png|webp)$'
+      pattern: '^offers/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+\.(jpg|png|webp)$'
       examples: ['offers/m1/o1/3f2a.jpg']
 
     ImageContentType:
