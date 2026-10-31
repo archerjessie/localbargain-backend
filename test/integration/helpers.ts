@@ -5,6 +5,7 @@ import { tableDefinition } from '../../src/data/table.js';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
 import { merchantProfileItem, offerItem } from '../../src/data/items.js';
 
+import { geohash } from '../../src/domain/geo.js';
 import type { MerchantProfile, Offer } from '../../src/domain/types.js';
 
 // A fresh table per test file, named in TABLE_NAME so the code under test uses it.
@@ -20,9 +21,10 @@ const created = '2026-01-01T00:00:00.000Z';
 
 // 0.009 degrees of latitude is about 1 km, so `km` places the shop that far north of the centre.
 export function merchantAt(merchantId: string, centre: { lat: number; lng: number }, km: number): MerchantProfile {
+  const lat = centre.lat + 0.009 * km;
   return {
     merchantId, name: `Shop ${merchantId}`, shopType: 'cafe', street: '1 Main St', suburb: 'Melbourne', state: 'VIC',
-    postcode: '3000', lat: centre.lat + 0.009 * km, lng: centre.lng, geohash: 'r1r0fsnzv', createdAt: created,
+    postcode: '3000', lat, lng: centre.lng, geohash: geohash(lat, centre.lng), createdAt: created,
   };
 }
 

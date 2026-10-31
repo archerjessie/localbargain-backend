@@ -1,4 +1,5 @@
 // Discovery Lambda: reference data and finding merchants (design D2).
+import { imageBaseUrl } from '../data/clients.js';
 import { discoveryCandidates } from '../data/merchants.js';
 import { discover } from '../domain/discovery.js';
 import { searchLocalities } from '../domain/localitySearch.js';
@@ -9,8 +10,6 @@ import { getCaller } from '../identity/caller.js';
 import { categories } from '../reference/categories.js';
 import localities from '../reference/localities.json' with { type: 'json' };
 import { router } from './router.js';
-
-const imageBaseUrl = () => process.env.IMAGE_BASE_URL ?? '';
 
 export const handler = router({
   'GET /categories': async () => json(200, { items: categories }),
