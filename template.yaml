@@ -37,6 +37,28 @@ Parameters:
     Default: ''
     NoEcho: true
 
+Rules:
+  GoogleAllOrNothing:
+    Assertions:
+      - Assert: !Or
+          - !And [!Equals [!Ref GoogleClientId, ''], !Equals [!Ref GoogleClientSecret, '']]
+          - !And [!Not [!Equals [!Ref GoogleClientId, '']], !Not [!Equals [!Ref GoogleClientSecret, '']]]
+        AssertDescription: Set both GoogleClientId and GoogleClientSecret, or neither.
+  AppleAllOrNothing:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Equals [!Ref AppleServicesId, '']
+            - !Equals [!Ref AppleTeamId, '']
+            - !Equals [!Ref AppleKeyId, '']
+            - !Equals [!Ref ApplePrivateKey, '']
+          - !And
+            - !Not [!Equals [!Ref AppleServicesId, '']]
+            - !Not [!Equals [!Ref AppleTeamId, '']]
+            - !Not [!Equals [!Ref AppleKeyId, '']]
+            - !Not [!Equals [!Ref ApplePrivateKey, '']]
+        AssertDescription: Set all four Apple parameters, or none.
+
 Conditions:
   HasGoogle: !And
     - !Not [!Equals [!Ref GoogleClientId, '']]
@@ -162,6 +184,9 @@ Resources:
   # Consumer accounts: self-signup with a verified email, plus optional Google and Apple (design D3, D4).
   ConsumerUserPool:
     Type: AWS::Cognito::UserPool
+    # A replacement would delete every consumer account and orphan redemption userIds. sam delete still removes it.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       UserPoolName: !Sub '${AWS::StackName}-consumers'
       # Lite covers the classic hosted UI and social sign-in. New pools default to Essentials, which costs more.
@@ -188,8 +213,10 @@ Resources:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
       UserPoolId: !Ref ConsumerUserPool
-      # Hosted UI prefixes are global, so the account ID keeps this one unique.
-      Domain: !Sub 'localbargain-${AWS::AccountId}'
+      # Hosted UI prefixes are global and lowercase. The first block of the stack's UUID makes one per stack.
+      Domain: !Sub
+        - 'localbargain-${StackUuidPrefix}'
+        - StackUuidPrefix: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]
       ManagedLoginVersion: 1
 
   GoogleIdentityProvider:
@@ -221,8 +248,10 @@ Resources:
         key_id: !Ref AppleKeyId
         private_key: !Ref ApplePrivateKey
         authorize_scopes: email name
+      # Apple sends the name only on the first authorization, so given_name can be missing. displayName is then null.
       AttributeMapping:
         email: email
+        email_verified: email_verified
         given_name: firstName
 
   ConsumerAppClient:
@@ -231,10 +260,12 @@ Resources:
       UserPoolId: !Ref ConsumerUserPool
       ClientName: consumer-app
       # Public client: the app cannot keep a secret, so it uses authorization code + PKCE.
+      # Cognito does not require code_challenge, so the consumer app must always send it (redirect is a custom scheme).
       GenerateSecret: false
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
-      AllowedOAuthScopes: [openid, email, profile]
+      # aws.cognito.signin.user.admin lets the app set given_name (the display name) after an email sign-up.
+      AllowedOAuthScopes: [openid, email, profile, aws.cognito.signin.user.admin]
       CallbackURLs: [!Ref ConsumerCallbackUrl]
       LogoutURLs: [!Ref ConsumerLogoutUrl]
       # Referencing the providers (not DependsOn) makes the client wait for them only when they exist.
@@ -242,8 +273,9 @@ Resources:
         - COGNITO
         - !If [HasGoogle, !Ref GoogleIdentityProvider, !Ref AWS::NoValue]
         - !If [HasApple, !Ref AppleIdentityProvider, !Ref AWS::NoValue]
-      # ADMIN_USER_PASSWORD_AUTH needs IAM credentials, so only operator smoke tests can use it.
-      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      # Consumers sign in through the hosted UI only (design D3). ADMIN_USER_PASSWORD_AUTH needs IAM credentials,
+      # so only operator smoke tests (task 8.2) can use it.
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
 
