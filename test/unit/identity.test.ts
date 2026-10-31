@@ -2,6 +2,7 @@ import {
   AdminCreateUserCommand,
   AdminGetUserCommand,
   AdminDeleteUserCommand,
+  AdminDisableUserCommand,
   ListUsersCommand,
   UsernameExistsException,
   UserNotFoundException,
@@ -68,6 +69,18 @@ describe('cognitoIdentity', () => {
 
     const gone = fakeClient((command) => (command instanceof AdminGetUserCommand ? notFound() : { Users: [] }));
     await expect(cognitoIdentity(gone.client, pools).deleteConsumer('sub-1')).resolves.toBeUndefined();
+  });
+
+  it('disables a consumer, and still finds and deletes the disabled account on a retry', async () => {
+    const { client, send } = fakeClient((command) =>
+      command instanceof AdminGetUserCommand ? { Username: 'sub-1', Enabled: false, UserAttributes: [] } : {},
+    );
+    await cognitoIdentity(client, pools).disableConsumer('sub-1');
+    await cognitoIdentity(client, pools).deleteConsumer('sub-1');
+    const commands = send.mock.calls.map(([c]) => c);
+    expect(commands[1]).toBeInstanceOf(AdminDisableUserCommand);
+    expect((commands[1] as AdminDisableUserCommand).input).toEqual({ UserPoolId: 'consumer-pool', Username: 'sub-1' });
+    expect(commands[3]).toBeInstanceOf(AdminDeleteUserCommand);
   });
 
   it('creates a merchant with the email as username and returns its sub', async () => {

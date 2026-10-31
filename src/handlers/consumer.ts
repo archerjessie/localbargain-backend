@@ -1,10 +1,12 @@
 // Consumer Lambda: the signed-in consumer's profile, QR codes, history, and account deletion (design D2).
 import { getOffer } from '../data/offers.js';
 import { qrKey } from '../data/qrKey.js';
+import { anonymiseConsumer } from '../data/redemptions.js';
 import { errorResponse } from '../domain/errors.js';
 import { signQr } from '../domain/qr.js';
-import { json } from '../domain/responses.js';
+import { json, noContent } from '../domain/responses.js';
 import { getCaller } from '../identity/caller.js';
+import { identity } from '../identity/identity.js';
 import { router } from './router.js';
 
 export const handler = router({
@@ -14,6 +16,18 @@ export const handler = router({
     if (!caller.ok) return caller.response;
     const { sub, email, displayName } = caller.caller;
     return json(200, { userId: sub, email, displayName: displayName ?? null });
+  },
+
+  // Design D5 order, plus a disable first: a disabled consumer counts as gone, so no scan can record a new linked
+  // redemption while the old ones are anonymised. A failure part-way leaves an account that can retry with its still-valid
+  // token, never personal data with no account. A retry finds nothing left to anonymise and deletes the user.
+  'DELETE /me': async (event) => {
+    const caller = getCaller(event, 'consumer');
+    if (!caller.ok) return caller.response;
+    await identity().disableConsumer(caller.caller.sub);
+    await anonymiseConsumer(caller.caller.sub);
+    await identity().deleteConsumer(caller.caller.sub);
+    return noContent();
   },
 
   // Design D10: the merchantId in the path finds the offer, which is keyed by merchant. Only active offers get a code.

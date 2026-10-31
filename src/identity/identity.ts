@@ -3,6 +3,7 @@ import {
   AdminCreateUserCommand,
   AdminGetUserCommand,
   AdminDeleteUserCommand,
+  AdminDisableUserCommand,
   CognitoIdentityProviderClient,
   ListUsersCommand,
   UsernameExistsException,
@@ -19,6 +20,7 @@ export interface Consumer {
 
 export interface Identity {
   getConsumer(sub: string): Promise<Consumer | null>;
+  disableConsumer(sub: string): Promise<void>;
   deleteConsumer(sub: string): Promise<void>;
   createMerchant(email: string): Promise<string>;
   findMerchantSub(email: string): Promise<string | null>;
@@ -37,13 +39,12 @@ export function cognitoIdentity(
   client: CognitoIdentityProviderClient,
   pools: { consumerPoolId: string; merchantPoolId: string },
 ): Identity {
-  // A disabled user counts as gone, so their QR codes stop working.
-  async function findConsumer(sub: string): Promise<{ username: string; attributes: AttributeType[] } | null> {
+  async function findConsumer(sub: string): Promise<{ username: string; enabled: boolean; attributes: AttributeType[] } | null> {
     if (!SUB.test(sub)) return null;
     try {
       // A native user's username is their sub, so this one cheap call covers most consumers.
       const user = await client.send(new AdminGetUserCommand({ UserPoolId: pools.consumerPoolId, Username: sub }));
-      return user.Enabled && user.Username ? { username: user.Username, attributes: user.UserAttributes ?? [] } : null;
+      return user.Username ? { username: user.Username, enabled: user.Enabled === true, attributes: user.UserAttributes ?? [] } : null;
     } catch (error) {
       if (!(error instanceof UserNotFoundException)) throw error;
     }
@@ -52,17 +53,25 @@ export function cognitoIdentity(
       new ListUsersCommand({ UserPoolId: pools.consumerPoolId, Filter: `sub = "${sub}"`, Limit: 1, AttributesToGet: ['given_name'] }),
     );
     const user = Users?.[0];
-    return user?.Enabled && user.Username ? { username: user.Username, attributes: user.Attributes ?? [] } : null;
+    return user?.Username ? { username: user.Username, enabled: user.Enabled === true, attributes: user.Attributes ?? [] } : null;
   }
 
   return {
+    // A disabled user counts as gone, so their QR codes stop working (DELETE /me disables first).
     async getConsumer(sub) {
       const user = await findConsumer(sub);
-      if (!user) return null;
+      if (!user?.enabled) return null;
       const displayName = attribute(user.attributes, 'given_name');
       return { sub, ...(displayName ? { displayName } : {}) };
     },
 
+    async disableConsumer(sub) {
+      const user = await findConsumer(sub);
+      if (!user) return;
+      await client.send(new AdminDisableUserCommand({ UserPoolId: pools.consumerPoolId, Username: user.username }));
+    },
+
+    // Finds the account whether or not it is disabled, so a retry after a failed DELETE /me can finish.
     async deleteConsumer(sub) {
       const user = await findConsumer(sub);
       // Already deleted: DELETE /me is safe to retry (design D5).
@@ -120,6 +129,7 @@ export const fixtureIdentity: Identity = {
     return user ? { sub: user.sub, displayName: user.displayName } : null;
   },
   // shortcut: local DELETE /me anonymises redemptions but keeps the fixture user, so the account can sign in again locally
+  async disableConsumer() {},
   async deleteConsumer() {},
   async createMerchant() {
     throw new Error('Admin routes are not used in local mode; seed-local.ts writes merchants directly');

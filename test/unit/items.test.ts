@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { merchantProfileItem, offerFromItem, offerItem, profileFromItem } from '../../src/data/items.js';
+import { merchantProfileItem, offerFromItem, offerItem, profileFromItem, redemptionFromItem, redemptionItem } from '../../src/data/items.js';
 import type { MerchantProfile, Offer } from '../../src/domain/types.js';
 
 const profile: MerchantProfile = {
@@ -34,5 +34,28 @@ describe('DynamoDB items (design D5)', () => {
   it('reads items back into domain values without the keys', () => {
     expect(profileFromItem(merchantProfileItem(profile))).toEqual(profile);
     expect(offerFromItem(offerItem(offer))).toEqual(offer);
+  });
+});
+
+describe('redemption items (design D5)', () => {
+  const redemption = {
+    redemptionId: 'r1', redeemedAt: '2026-11-01T10:00:00.000Z', merchantId: 'm1', merchantName: 'Bean There',
+    userId: 'consumer-1', displayName: 'Alex', offerId: 'o1', productName: 'Flat white', categoryId: 'coffee' as const,
+    percentOff: 15, originalPriceCents: 450, discountedPriceCents: 383,
+  };
+
+  it('keys a redemption under the shop by time, and under the consumer in GSI1', () => {
+    expect(redemptionItem(redemption)).toEqual({
+      ...redemption,
+      PK: 'MERCHANT#m1', SK: 'REDEMPTION#2026-11-01T10:00:00.000Z#r1',
+      GSI1PK: 'USER#consumer-1', GSI1SK: '2026-11-01T10:00:00.000Z#r1',
+    });
+  });
+
+  it('has no GSI1 keys once anonymised', () => {
+    const { userId: _u, displayName: _d, ...anonymous } = redemption;
+    void [_u, _d];
+    expect(redemptionItem(anonymous)).not.toHaveProperty('GSI1PK');
+    expect(redemptionFromItem(redemptionItem(redemption))).toEqual(redemption);
   });
 });

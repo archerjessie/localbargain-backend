@@ -1,8 +1,8 @@
 // DynamoDB item shapes from design D5: domain values plus their table and index keys.
-import type { MerchantProfile, Offer } from '../domain/types.js';
+import type { MerchantProfile, Offer, Redemption } from '../domain/types.js';
 
 const KEYS = ['PK', 'SK', 'GSI1PK', 'GSI1SK', 'GSI2PK', 'GSI2SK'] as const;
-type Keyed<T> = T & { PK: string; SK: string; GSI2PK?: string; GSI2SK?: string };
+type Keyed<T> = T & { PK: string; SK: string; GSI1PK?: string; GSI1SK?: string; GSI2PK?: string; GSI2SK?: string };
 
 const merchantPk = (merchantId: string) => `MERCHANT#${merchantId}`;
 
@@ -20,6 +20,17 @@ export function offerItem(offer: Offer): Keyed<Offer> {
   return offer.active ? { ...offer, ...key, GSI2PK: 'DISCOVERY', GSI2SK: `${key.PK}#${key.SK}` } : { ...offer, ...key };
 }
 
+// Shop history sorts by SK, consumer history by GSI1SK. An anonymised redemption has no GSI1 keys (design D5).
+export function redemptionItem(redemption: Redemption): Keyed<Redemption> {
+  const at = `${redemption.redeemedAt}#${redemption.redemptionId}`;
+  return {
+    ...redemption,
+    PK: merchantPk(redemption.merchantId),
+    SK: `REDEMPTION#${at}`,
+    ...(redemption.userId ? { GSI1PK: `USER#${redemption.userId}`, GSI1SK: at } : {}),
+  };
+}
+
 function withoutKeys<T>(item: object): T {
   const value: Record<string, unknown> = { ...item };
   for (const key of KEYS) delete value[key];
@@ -28,3 +39,4 @@ function withoutKeys<T>(item: object): T {
 
 export const profileFromItem = (item: object) => withoutKeys<MerchantProfile>(item);
 export const offerFromItem = (item: object) => withoutKeys<Offer>(item);
+export const redemptionFromItem = (item: object) => withoutKeys<Redemption>(item);
