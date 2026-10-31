@@ -40,7 +40,9 @@ ssm_json="$(aws ssm get-parameters-by-path --region "$region" --path "$prefix" -
   die "reading SSM $prefix failed: $(cat "$err")"
 
 if stack_json="$(aws cloudformation describe-stacks --region "$region" --stack-name "$stack" --output json 2>"$err")"; then
-  change_set_type=UPDATE
+  # A stack whose first change set never ran has no resources yet and only takes a CREATE change set.
+  status="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).Stacks[0].StackStatus)' "$stack_json")"
+  [[ "$status" == REVIEW_IN_PROGRESS ]] && change_set_type=CREATE || change_set_type=UPDATE
   pool_id="$(node -e 'const o=JSON.parse(process.argv[1]).Stacks[0].Outputs??[];process.stdout.write(o.find(x=>x.OutputKey==="ConsumerUserPoolId")?.OutputValue??"")' "$stack_json")"
 elif grep -q "does not exist" "$err"; then
   change_set_type=CREATE

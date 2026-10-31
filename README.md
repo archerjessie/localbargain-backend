@@ -64,7 +64,7 @@ aws cloudformation deploy --region ap-southeast-2 --stack-name localbargain-boot
   --template-file bootstrap.yaml --capabilities CAPABILITY_NAMED_IAM
 ```
 
-It creates the CloudFormation service role `localbargain-cfn-deploy`, which the app stack deploys as, so the deploying user needs no rights on Lambda, DynamoDB, Cognito, CloudFront or Budgets. It also attaches the `localbargain-deployer` policy to the IAM user `local_bargain` (parameter `DeployerUserName`). That policy covers what runs outside CloudFormation: passing the role, the SSM parameters, the artifact bucket `localbargain-artifacts-<account>-ap-southeast-2`, the admin script, and the smoke tests. After the bootstrap the user also needs `AWSCloudFormationFullAccess`.
+It creates the CloudFormation service role `localbargain-cfn-deploy`, which the app stack deploys as, so the deploying user needs no rights on Lambda, DynamoDB, Cognito, CloudFront or Budgets. It also attaches the `localbargain-deployer` policy to the IAM user `local_bargain` (parameter `DeployerUserName`). That policy covers what runs outside CloudFormation: passing the role, the SSM parameters, the artifact bucket `localbargain-artifacts-<account>-ap-southeast-2`, the admin script, and the smoke tests. The policy also lets the user change and delete the app stack, so besides it the user needs only `AWSCloudFormationReadOnlyAccess`. Updating `bootstrap.yaml` itself still needs an identity that can manage IAM.
 
 > **Warning:** whoever can update the app stack can give a function role any permission through the service role, so stack update rights are close to admin rights in this account. Grant them only to people you would trust with admin.
 

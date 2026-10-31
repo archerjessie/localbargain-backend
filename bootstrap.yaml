@@ -111,6 +111,16 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
+          # Changes to the app stack only. Reading stacks comes from AWSCloudFormationReadOnlyAccess.
+          - Effect: Allow
+            Action: [cloudformation:CreateChangeSet, cloudformation:ExecuteChangeSet, cloudformation:DeleteChangeSet, cloudformation:DeleteStack]
+            Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${StackName}/*'
+          - Effect: Allow
+            Action: cloudformation:CreateChangeSet
+            Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31'
+          - Effect: Allow
+            Action: iam:ListAttachedUserPolicies
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:user/${DeployerUserName}'
           - Effect: Allow
             Action: iam:PassRole
             Resource: !GetAtt DeployRole.Arn
