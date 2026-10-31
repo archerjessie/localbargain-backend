@@ -5,9 +5,13 @@ info:
   description: |
     Contract for the LocalBargain consumer and merchant apps.
 
-    Every error from a handler uses the `Error` shape. A 401 from the API Gateway
-    JWT authorizer is produced before any handler runs, so its body is
-    `{"message": "Unauthorized"}` with no `code`.
+    Every error from a handler uses the `Error` shape. API Gateway rejects some
+    requests before any handler runs: 401 (JWT authorizer), 403 (IAM authorizer on
+    admin routes), and 429 (stage throttle). Those bodies are `GatewayError`
+    (`{"message": "..."}`, no `code`), because HTTP APIs cannot customise them.
+
+    History pages hold a fixed 20 items. Pass `nextCursor` back as `cursor` to get
+    the next page. No `nextCursor` means there are no more pages.
 
     Prices are whole AUD cents. `discountedPriceCents` is computed from
     `originalPriceCents` and `percentOff` (rounded half up) and is never accepted as input.
@@ -48,11 +52,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Category' }
-        '429':
-          description: The API-wide throttle (10 requests per second, burst 20) was exceeded
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/GatewayError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /discovery:
     get:
@@ -89,6 +89,7 @@ paths:
                     items: { $ref: '#/components/schemas/DiscoveryMerchant' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /locations:
     get:
@@ -118,6 +119,7 @@ paths:
                     items: { $ref: '#/components/schemas/Locality' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /merchants/{merchantId}:
     get:
@@ -135,6 +137,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MerchantWithOffers' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /merchants/{merchantId}/offers/{offerId}/qr:
@@ -161,6 +164,7 @@ paths:
                     type: string
                     examples: ['lb1.local-consumer-1.01J9Z8Q4K7.abc123']
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /me:
@@ -177,6 +181,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ConsumerProfile' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     delete:
       tags: [consumer]
       operationId: deleteMe
@@ -188,6 +193,7 @@ paths:
         '204':
           description: Account deleted
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /me/redemptions:
     get:
@@ -214,6 +220,7 @@ paths:
                   nextCursor: { $ref: '#/components/schemas/NextCursor' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /merchant/me:
     get:
@@ -229,6 +236,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Merchant' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /merchant/offers:
@@ -251,6 +259,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Offer' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     post:
       tags: [merchant]
       operationId: createOffer
@@ -271,6 +280,7 @@ paths:
               schema: { $ref: '#/components/schemas/Offer' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /merchant/offers/{offerId}:
     parameters:
@@ -298,6 +308,7 @@ paths:
               schema: { $ref: '#/components/schemas/Offer' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [merchant]
@@ -310,6 +321,7 @@ paths:
         '204':
           description: Offer deleted
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /merchant/offers/{offerId}/image:
@@ -344,6 +356,7 @@ paths:
               schema: { $ref: '#/components/schemas/ImageUpload' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /merchant/redemptions:
@@ -371,6 +384,7 @@ paths:
                   nextCursor: { $ref: '#/components/schemas/NextCursor' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     post:
       tags: [merchant]
       operationId: recordRedemption
@@ -399,6 +413,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '404':
           description: The consumer account no longer exists (`consumer_not_found`)
           content:
@@ -440,6 +455,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GatewayError' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
 components:
   securitySchemes:
@@ -457,7 +473,12 @@ components:
       type: apiKey
       in: header
       name: Authorization
-      description: AWS Signature Version 4 with administrator IAM credentials (for example `awscurl --service execute-api`).
+      description: |
+        AWS Signature Version 4 with administrator IAM credentials. This is not a
+        static key: each request must be signed by a SigV4 signer (for example
+        `awscurl --service execute-api --region ap-southeast-2` or an AWS SDK),
+        which also sends `X-Amz-Date`, and `X-Amz-Security-Token` for temporary
+        credentials.
 
   parameters:
     MerchantId:
@@ -498,6 +519,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: The API-wide throttle (10 requests per second, burst 20) was exceeded. Retry later.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/GatewayError' }
 
   schemas:
     Error:
@@ -506,7 +532,23 @@ components:
       properties:
         code:
           type: string
-          description: Machine-readable error code, for example `validation_error`, `not_found`, `invalid_qr`.
+          description: |
+            Machine-readable error code. Clients branch on it:
+            - `validation_error`: the request failed validation (400)
+            - `invalid_qr`: the QR value is malformed or its signature is wrong (400). Re-fetch the QR value.
+            - `not_found`: the resource does not exist (404)
+            - `consumer_not_found`: the scanned consumer account no longer exists (404)
+            - `conflict`: the resource already exists (409)
+            - `offer_unavailable`: the scanned offer is not an active offer of this shop (422)
+            - `internal_error`: an unexpected server error (500)
+          enum:
+            - validation_error
+            - invalid_qr
+            - not_found
+            - consumer_not_found
+            - conflict
+            - offer_unavailable
+            - internal_error
         message:
           type: string
 
@@ -523,10 +565,16 @@ components:
 
     Category:
       type: object
+      additionalProperties: false
       required: [categoryId, name]
       properties:
-        categoryId: { type: string, examples: [coffee] }
+        categoryId: { $ref: '#/components/schemas/CategoryId' }
         name: { type: string, examples: [Coffee] }
+
+    CategoryId:
+      type: string
+      description: The fixed platform list, also served by `GET /categories`.
+      enum: [coffee, bakery, meals, desserts, drinks, groceries, beauty, health, fashion, retail, services, other]
 
     ShopType:
       type: string
@@ -542,6 +590,7 @@ components:
 
     Locality:
       type: object
+      additionalProperties: false
       required: [suburb, state, postcode, lat, lng]
       properties:
         suburb: { type: string }
@@ -550,7 +599,7 @@ components:
         lat: { type: number }
         lng: { type: number }
 
-    Merchant:
+    MerchantFields:
       type: object
       required: [merchantId, name, shopType, street, suburb, state, postcode, lat, lng]
       properties:
@@ -564,9 +613,14 @@ components:
         lat: { type: number }
         lng: { type: number }
 
-    MerchantWithOffers:
+    Merchant:
       allOf:
-        - $ref: '#/components/schemas/Merchant'
+        - $ref: '#/components/schemas/MerchantFields'
+      unevaluatedProperties: false
+
+    MerchantWithOffersFields:
+      allOf:
+        - $ref: '#/components/schemas/MerchantFields'
         - type: object
           required: [offers]
           properties:
@@ -575,13 +629,19 @@ components:
               description: Active offers only.
               items: { $ref: '#/components/schemas/Offer' }
 
+    MerchantWithOffers:
+      allOf:
+        - $ref: '#/components/schemas/MerchantWithOffersFields'
+      unevaluatedProperties: false
+
     DiscoveryMerchant:
       allOf:
-        - $ref: '#/components/schemas/MerchantWithOffers'
+        - $ref: '#/components/schemas/MerchantWithOffersFields'
         - type: object
           required: [distanceMetres]
           properties:
             distanceMetres: { type: integer, minimum: 0 }
+      unevaluatedProperties: false
 
     MerchantCreate:
       type: object
@@ -616,13 +676,23 @@ components:
       minimum: 1
       maximum: 1000000
 
+    DiscountedPriceCents:
+      type: integer
+      minimum: 0
+      description: originalPriceCents × (100 − percentOff) / 100, rounded half up.
+
     ProductName:
       type: string
       minLength: 1
       maxLength: 80
 
+    Description:
+      type: [string, 'null']
+      maxLength: 200
+
     Offer:
       type: object
+      additionalProperties: false
       required:
         - offerId
         - merchantId
@@ -640,16 +710,11 @@ components:
         offerId: { type: string }
         merchantId: { type: string }
         productName: { $ref: '#/components/schemas/ProductName' }
-        categoryId: { type: string }
+        categoryId: { $ref: '#/components/schemas/CategoryId' }
         percentOff: { $ref: '#/components/schemas/PercentOff' }
         originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
-        discountedPriceCents:
-          type: integer
-          minimum: 0
-          description: originalPriceCents × (100 − percentOff) / 100, rounded half up.
-        description:
-          type: [string, 'null']
-          maxLength: 200
+        discountedPriceCents: { $ref: '#/components/schemas/DiscountedPriceCents' }
+        description: { $ref: '#/components/schemas/Description' }
         imageUrl:
           type: [string, 'null']
           format: uri
@@ -663,10 +728,10 @@ components:
       required: [productName, categoryId, percentOff, originalPriceCents]
       properties:
         productName: { $ref: '#/components/schemas/ProductName' }
-        categoryId: { type: string, description: 'A `categoryId` from `GET /categories`.' }
+        categoryId: { $ref: '#/components/schemas/CategoryId' }
         percentOff: { $ref: '#/components/schemas/PercentOff' }
         originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
-        description: { type: string, maxLength: 200 }
+        description: { $ref: '#/components/schemas/Description' }
         active: { type: boolean, default: true }
 
     OfferUpdate:
@@ -675,16 +740,23 @@ components:
       minProperties: 1
       properties:
         productName: { $ref: '#/components/schemas/ProductName' }
-        categoryId: { type: string }
+        categoryId: { $ref: '#/components/schemas/CategoryId' }
         percentOff: { $ref: '#/components/schemas/PercentOff' }
         originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
-        description:
-          type: [string, 'null']
-          maxLength: 200
+        description: { $ref: '#/components/schemas/Description' }
         active: { type: boolean }
         imageKey:
-          type: [string, 'null']
+          oneOf:
+            - $ref: '#/components/schemas/ImageKey'
+            - type: 'null'
           description: A key from `POST /merchant/offers/{offerId}/image`, or null to remove the image.
+
+    ImageKey:
+      type: string
+      description: '`offers/<merchantId>/<offerId>/<uuid>.<ext>`'
+      minLength: 1
+      pattern: '^offers/[^/]+/[^/]+/[^/]+\.(jpg|png|webp)$'
+      examples: ['offers/m1/o1/3f2a.jpg']
 
     ImageContentType:
       type: string
@@ -692,11 +764,13 @@ components:
 
     ImageUpload:
       type: object
+      additionalProperties: false
       required: [imageKey, upload, expiresAt]
       properties:
-        imageKey: { type: string, examples: ['offers/m1/o1/3f2a.jpg'] }
+        imageKey: { $ref: '#/components/schemas/ImageKey' }
         upload:
           type: object
+          additionalProperties: false
           required: [url, fields]
           properties:
             url: { type: string, format: uri }
@@ -707,6 +781,7 @@ components:
 
     ConsumerProfile:
       type: object
+      additionalProperties: false
       required: [userId, email, displayName]
       properties:
         userId: { type: string }
@@ -730,11 +805,11 @@ components:
         redeemedAt: { type: string, format: date-time }
         merchantId: { type: string }
         offerId: { type: string }
-        productName: { type: string }
-        categoryId: { type: string }
-        percentOff: { type: integer }
-        originalPriceCents: { type: integer }
-        discountedPriceCents: { type: integer }
+        productName: { $ref: '#/components/schemas/ProductName' }
+        categoryId: { $ref: '#/components/schemas/CategoryId' }
+        percentOff: { $ref: '#/components/schemas/PercentOff' }
+        originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
+        discountedPriceCents: { $ref: '#/components/schemas/DiscountedPriceCents' }
 
     ConsumerRedemption:
       allOf:
@@ -743,9 +818,10 @@ components:
           required: [merchantName]
           properties:
             merchantName: { type: string }
+      unevaluatedProperties: false
 
     MerchantRedemption:
-      description: Never contains the consumer's email or contact details.
+      description: Never contains the consumer's email, user ID, or contact details.
       allOf:
         - $ref: '#/components/schemas/RedemptionBase'
         - type: object
@@ -754,3 +830,4 @@ components:
             displayName:
               type: [string, 'null']
               description: Null when the consumer has no display name or has deleted their account.
+      unevaluatedProperties: false
