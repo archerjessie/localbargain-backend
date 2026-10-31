@@ -24,6 +24,12 @@ describe('buildParameters', () => {
     expect(() => buildParameters(base, ['SignInWithApple'], prefix)).toThrow(/apple-private-key/);
   });
 
+  // CloudFormation does not enforce template Rules on this SAM stack, so a half-set provider must fail here.
+  it('refuses a provider that is only partly configured', () => {
+    expect(() => buildParameters([...base, param('google-client-id', 'id')], [], prefix)).toThrow(/google-client-secret/);
+    expect(() => buildParameters([...base, param('apple-team-id', 't')], [], prefix)).toThrow(/apple-services-id/);
+  });
+
   it('matches provider names exactly', () => {
     expect(() => buildParameters(base, ['GoogleWorkspace'], prefix)).not.toThrow();
   });

@@ -99,7 +99,7 @@ aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name <stack> --quer
 
 The consumer user pool uses the **Lite** feature tier, which is set explicitly because new pools default to Essentials. Lite is the lowest tier that supports the classic hosted UI and Google and Apple sign-in. It includes 10,000 monthly active users (MAU) free per account, then costs from USD 0.0055 per MAU (Essentials costs USD 0.015). Google and Apple users count as normal MAUs. Pools created on or before 22 November 2024 keep a legacy free tier of 50,000 MAU.
 
-Google and Apple sign-in are optional. If `GoogleClientId`/`GoogleClientSecret`, or all four `Apple*` parameters, are left empty, that provider is not created, and email and password sign-in still works. A provider that is only half configured fails the deploy (template `Rules`). `scripts/deploy.sh` reads the secrets from SSM (see Deploying).
+Google and Apple sign-in are optional. If `GoogleClientId`/`GoogleClientSecret`, or all four `Apple*` parameters, are left empty, that provider is not created, and email and password sign-in still works. `scripts/deploy.sh` refuses a provider that is only half configured. The template's `Rules` are not enough on their own: a change set that set only `GoogleClientId` went through with "No updates are to be performed". `scripts/deploy.sh` reads the secrets from SSM (see Deploying).
 
 > **Warning:** a deploy without the federation parameters deletes any Google or Apple provider that already exists, and the deploy still succeeds. `scripts/deploy.sh` refuses such a deploy.
 

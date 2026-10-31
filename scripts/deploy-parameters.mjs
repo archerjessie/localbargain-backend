@@ -28,6 +28,10 @@ export function buildParameters(ssmParameters, providerNames, prefix) {
         `the stack has ${provider} sign-in, but ${missing.map((m) => `${prefix}/${m}`).join(', ')} is empty; refusing to delete the provider`,
       );
     }
+    // CloudFormation does not enforce the template Rules on this SAM stack, so a half-set provider is caught here.
+    if (missing.length && missing.length < Object.keys(names).length) {
+      throw new Error(`${provider} sign-in is partly configured: set ${missing.map((m) => `${prefix}/${m}`).join(', ')}, or remove the others`);
+    }
     // Empty values are left out, so they take the template default ('') rather than an ambiguous empty override.
     for (const [key, name] of Object.entries(names)) if (value(name)) parameters[key] = value(name);
   }
