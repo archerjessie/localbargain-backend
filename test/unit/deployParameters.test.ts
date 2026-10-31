@@ -9,7 +9,7 @@ const asObject = (list: { ParameterKey: string; ParameterValue: string }[]) =>
 
 describe('buildParameters', () => {
   it('passes the budget email and the QR key version, and leaves empty federation values out', () => {
-    expect(asObject(buildParameters(base, [], prefix))).toEqual({ BudgetEmail: 'owner@example.com', QrKeyVersion: '3' });
+    expect(asObject(buildParameters(base, [], prefix))).toEqual({ BudgetEmail: 'owner@example.com', QrKeyVersion: '3', EnableSmokeTestAuth: 'false' });
   });
 
   it('passes a multi-line Apple private key through unchanged', () => {
@@ -28,6 +28,11 @@ describe('buildParameters', () => {
   it('refuses a provider that is only partly configured', () => {
     expect(() => buildParameters([...base, param('google-client-id', 'id')], [], prefix)).toThrow(/google-client-secret/);
     expect(() => buildParameters([...base, param('apple-team-id', 't')], [], prefix)).toThrow(/apple-services-id/);
+  });
+
+  it('turns on smoke-test sign-in only when asked', () => {
+    expect(asObject(buildParameters(base, [], prefix, { smokeTestAuth: true })).EnableSmokeTestAuth).toBe('true');
+    expect(asObject(buildParameters(base, [], prefix)).EnableSmokeTestAuth).toBe('false');
   });
 
   it('matches provider names exactly', () => {

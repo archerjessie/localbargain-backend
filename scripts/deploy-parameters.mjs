@@ -12,14 +12,19 @@ const groups = {
   },
 };
 
-export function buildParameters(ssmParameters, providerNames, prefix) {
+export function buildParameters(ssmParameters, providerNames, prefix, { smokeTestAuth = false } = {}) {
   const ssm = Object.fromEntries(ssmParameters.map((p) => [p.Name.slice(prefix.length + 1), p]));
   const value = (name) => ssm[name]?.Value ?? '';
   if (!ssm['qr-key']) throw new Error(`create ${prefix}/qr-key first (see README)`);
   if (!value('budget-email')) throw new Error(`create ${prefix}/budget-email first`);
 
-  // The key's SSM version lands in an env var, so a rotation always replaces the running functions.
-  const parameters = { BudgetEmail: value('budget-email'), QrKeyVersion: String(ssm['qr-key'].Version) };
+  const parameters = {
+    BudgetEmail: value('budget-email'),
+    // The key's SSM version lands in an env var, so a rotation always replaces the running functions.
+    QrKeyVersion: String(ssm['qr-key'].Version),
+    // Always passed, so a plain deploy turns smoke-test sign-in off again.
+    EnableSmokeTestAuth: String(smokeTestAuth),
+  };
   for (const [provider, names] of Object.entries(groups)) {
     const missing = Object.values(names).filter((name) => !value(name));
     // A deploy without a provider's parameters deletes it, and CloudFormation still reports success.
@@ -45,6 +50,7 @@ if (process.argv[1]?.endsWith('deploy-parameters.mjs')) {
       JSON.parse(ssmJson).Parameters,
       JSON.parse(providersJson).Providers.map((p) => p.ProviderName),
       prefix,
+      { smokeTestAuth: process.env.SMOKE_TEST_AUTH === '1' },
     );
     writeFileSync(out, JSON.stringify(parameters), { mode: 0o600 });
   } catch (error) {

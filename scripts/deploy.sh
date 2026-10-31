@@ -15,6 +15,7 @@
 #
 # Usage: scripts/deploy.sh
 #   REVIEW_ONLY=1 scripts/deploy.sh   creates the change set and stops, so you can inspect it without changing anything.
+#   SMOKE_TEST_AUTH=1 scripts/deploy.sh   allows ADMIN_USER_PASSWORD_AUTH for the smoke test. A plain deploy turns it off.
 set -euo pipefail
 
 stack="localbargain-dev"
