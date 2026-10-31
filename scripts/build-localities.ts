@@ -61,13 +61,15 @@ for (const row of rows) {
   if (r[iType!] !== 'Delivery Area' || !STATES.has(r[iState!]!)) continue;
   const lat = coord(r[iLatPrecise!], r[iLat!]);
   const lng = coord(r[iLngPrecise!], r[iLng!]);
-  if (lat === 0 || lng === 0) continue;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0 || lng === 0) continue;
   const locality = { suburb: titleCase(r[iLocality!]!), state: r[iState!]!, postcode: r[iPostcode!]!, lat, lng };
   byKey.set(`${locality.suburb}|${locality.state}|${locality.postcode}`, locality);
 }
 
+// Code-unit order, not localeCompare, so the output is the same on every machine.
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const localities = [...byKey.values()].sort(
-  (a, b) => a.suburb.localeCompare(b.suburb) || a.state.localeCompare(b.state) || a.postcode.localeCompare(b.postcode),
+  (a, b) => compare(a.suburb, b.suburb) || compare(a.state, b.state) || compare(a.postcode, b.postcode),
 );
 writeFileSync(new URL('../src/reference/localities.json', import.meta.url), JSON.stringify(localities) + '\n');
 console.log(`wrote ${localities.length} localities`);
