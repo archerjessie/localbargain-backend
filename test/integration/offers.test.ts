@@ -3,6 +3,7 @@ import { handler as discovery } from '../../src/handlers/discovery.js';
 import { handler } from '../../src/handlers/merchant.js';
 import { expectContract } from '../support/contract.js';
 import { apiEvent, bodyOf } from '../support/events.js';
+import { putOffer } from '../../src/data/offers.js';
 import { createTestTable, merchantAt, putItems, testOffer } from './helpers.js';
 
 const centre = { lat: -37.8136, lng: 144.9631 };
@@ -23,7 +24,7 @@ const discoveredOfferIds = async () =>
 let drop: () => Promise<void>;
 beforeAll(async () => {
   ({ drop } = await createTestTable());
-  await putItems([merchantAt('merchant-a', centre, 1), merchantAt('merchant-b', centre, 2)], [testOffer('merchant-b', 'b-offer')]);
+  await putItems([merchantAt('merchant-a', centre, 1), merchantAt('merchant-b', centre, 2)], [testOffer('merchant-b', 'b-offer', { percentOff: 15 })]);
 });
 afterAll(async () => drop?.());
 
@@ -91,6 +92,15 @@ describe('PATCH /merchant/offers/{offerId}', () => {
   it('clears the description with null', async () => {
     const { offerId } = bodyOf(await create({ ...flatWhite, description: 'Any size' }));
     expect(bodyOf(await patch(offerId, { description: null })).description).toBeNull();
+    const stored = bodyOf(await list()).items.find((o: { offerId: string }) => o.offerId === offerId);
+    expect(stored.description).toBeNull();
+  });
+
+  it('treats an empty description like null, on create and on update', async () => {
+    const created = bodyOf(await create({ ...flatWhite, description: '  ' }));
+    expect(created.description).toBeNull();
+    await patch(created.offerId, { description: 'Any size' });
+    expect(bodyOf(await patch(created.offerId, { description: '' })).description).toBeNull();
   });
 
   it("answers 404 for another merchant's offer and changes nothing", async () => {
@@ -99,6 +109,19 @@ describe('PATCH /merchant/offers/{offerId}', () => {
     expectContract('PATCH', '/merchant/offers/{offerId}', 404, bodyOf(response));
     const own = bodyOf(await list(merchantB)).items.find((o: { offerId: string }) => o.offerId === 'b-offer');
     expect(own.percentOff).toBe(15);
+  });
+
+  it('answers 409 when the offer changed since it was read, instead of overwriting the other change', async () => {
+    const { offerId } = bodyOf(await create(flatWhite));
+    const offers = bodyOf(await list()).items;
+    const offer = offers.find((o: { offerId: string }) => o.offerId === offerId);
+    // Another request deactivates the offer after this one read it.
+    const { discountedPriceCents: _d, imageUrl: _i, description: _desc, ...stored } = offer;
+    void [_d, _i, _desc];
+    const stale = { ...stored, updatedAt: offer.updatedAt };
+    await putOffer({ ...stale, active: false, updatedAt: new Date().toISOString() }, { expectedUpdatedAt: offer.updatedAt });
+    await expect(putOffer({ ...stale, percentOff: 30 }, { expectedUpdatedAt: offer.updatedAt })).rejects.toThrow();
+    expect(bodyOf(await list()).items.find((o: { offerId: string }) => o.offerId === offerId).active).toBe(false);
   });
 
   it('answers 400 for an invalid change', async () => {

@@ -310,6 +310,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The offer changed after this request read it (`conflict`). Fetch the offer again and retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     delete:
       tags: [merchant]
       operationId: deleteOffer

@@ -1,8 +1,8 @@
 // Merchant Lambda: the signed-in merchant's shop, offers, and redemptions (design D2).
 import { randomUUID } from 'node:crypto';
 import { imageBaseUrl } from '../data/clients.js';
-import { getMerchantProfile, merchantPartition } from '../data/merchants.js';
-import { deleteOffer, getOffer, putOffer } from '../data/offers.js';
+import { getMerchantProfile, merchantProfileExists } from '../data/merchants.js';
+import { deleteOffer, getOffer, listOffers, OfferChangedError, putOffer } from '../data/offers.js';
 import { errorResponse } from '../domain/errors.js';
 import { json, noContent } from '../domain/responses.js';
 import type { Offer } from '../domain/types.js';
@@ -26,7 +26,7 @@ export const handler = router({
   'GET /merchant/offers': async (event) => {
     const caller = getCaller(event, 'merchant');
     if (!caller.ok) return caller.response;
-    const { offers } = await merchantPartition(caller.caller.sub);
+    const offers = await listOffers(caller.caller.sub);
     return json(200, { items: offers.map((offer) => offerView(offer, imageBaseUrl())) });
   },
 
@@ -36,7 +36,7 @@ export const handler = router({
     const body = parseJsonBody(offerCreate, event.body, event.isBase64Encoded);
     if (!body.ok) return body.response;
     // An offer without a shop profile would never show in discovery.
-    if (!(await getMerchantProfile(caller.caller.sub))) {
+    if (!(await merchantProfileExists(caller.caller.sub))) {
       return errorResponse(404, 'not_found', 'No shop profile for this merchant account');
     }
     const now = new Date().toISOString();
@@ -49,7 +49,7 @@ export const handler = router({
       createdAt: now,
       updatedAt: now,
     };
-    await putOffer(offer, 'create');
+    await putOffer(offer, { create: true });
     return json(201, offerView(offer, imageBaseUrl()));
   },
 
@@ -62,12 +62,19 @@ export const handler = router({
     if (!current) return offerNotFound();
     const { description, imageKey, ...fields } = body.data;
     if (imageKey !== undefined) return errorResponse(400, 'validation_error', 'imageKey is not supported yet');
-    // Absent fields stay as they are, so drop the undefined ones before merging.
+    // zod types optional keys as `T | undefined`. Dropping undefined values lets the merge satisfy exactOptionalPropertyTypes.
     const changes = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Partial<Offer>;
     const updated: Offer = { ...current, ...changes, updatedAt: new Date().toISOString() };
     if (description === null) delete updated.description;
     else if (description !== undefined) updated.description = description;
-    await putOffer(updated, 'replace');
+    try {
+      await putOffer(updated, { expectedUpdatedAt: current.updatedAt });
+    } catch (error) {
+      if (!(error instanceof OfferChangedError)) throw error;
+      // Deleted or changed by another request since the read above.
+      if (!(await getOffer(current.merchantId, current.offerId))) return offerNotFound();
+      return errorResponse(409, 'conflict', 'The offer changed while this update was in progress. Fetch it again and retry.');
+    }
     return json(200, offerView(updated, imageBaseUrl()));
   },
 
