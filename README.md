@@ -2,6 +2,41 @@
 
 Backend API for LocalBargain. The contract is [`openapi.yaml`](openapi.yaml).
 
+## Local mode
+
+The consumer and merchant apps develop against a local copy of the API, with no AWS account. It runs `sam local` against DynamoDB Local and MinIO in Docker (design D9).
+
+You need Docker, Node.js 22 or later, and the AWS SAM CLI. Run these from the repository root:
+
+```sh
+npm ci
+docker compose up -d --wait   # DynamoDB Local on :8000, MinIO on :9000 (console :9001)
+npm run seed:local            # creates the table and writes the test shops, offers, and one image
+npm run build                 # sam build
+sam local start-api --env-vars local/env.json --docker-network localbargain
+```
+
+The API is then at `http://localhost:3000`. The Android emulator reaches it at **`http://10.0.2.2:3000`**, and the offer images at `http://10.0.2.2:9000/localbargain-images/...`.
+
+Local mode has no sign-in. Each request names its caller in the `x-debug-sub` header, using one of the fixed test users in `local/users.json`:
+
+| `x-debug-sub` | Pool | Notes |
+|---|---|---|
+| `local-consumer-1` | consumer | display name Alex |
+| `local-consumer-2` | consumer | display name Sam |
+| `local-merchant-1` | merchant | owns Bean There, Melbourne |
+| `local-merchant-2` | merchant | owns Harbour Bakery, Sydney |
+
+A missing or unknown sub, or a sub from the wrong pool for the route, gets 401, as the deployed API would. The header only works when both `LOCAL_AUTH=1` (from `local/env.json`) and `AWS_SAM_LOCAL=true` (set by `sam local`) are present, so it has no effect on a deployed stack.
+
+```sh
+curl -H "x-debug-sub: local-consumer-1" "localhost:3000/discovery?lat=-37.8136&lng=144.9631"
+```
+
+`npm run seed:local` also prints a ready `qrValue` for `local-consumer-1` and the Flat white offer. Paste it into the merchant app to test a scan on an emulator that has no camera. In local mode `DELETE /me` anonymises the redemptions but keeps the test user, so you can sign in as it again.
+
+`local/env.json` holds a QR signing key that is public on purpose. The functions use it only in local mode. A deployed stack always reads its key from SSM.
+
 ## Infrastructure
 
 The stack is defined in `template.yaml` (AWS SAM) and deployed to `ap-southeast-2`.
