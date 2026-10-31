@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  LocalBargain deploy permissions, created once per account. A CloudFormation service role deploys the
+  localbargain-dev stack, so the deploying IAM user needs no rights on Lambda, DynamoDB, Cognito and the rest.
+  Deploy it with an identity that can manage IAM (see README, Deploying).
+
+Parameters:
+  DeployerUserName:
+    Type: String
+    Default: local_bargain
+    Description: The IAM user that runs scripts/deploy.sh and the smoke tests.
+  StackName:
+    Type: String
+    Default: localbargain-dev
+    AllowedPattern: '^[a-z][a-z0-9-]*$'
+    Description: The app stack the service role may manage. Generated resource names start with it.
+
+Resources:
+  # Used by CloudFormation only. Its name does not start with the stack name, so the role cannot change itself.
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: localbargain-cfn-deploy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { 'aws:SourceAccount': !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: deploy-app-stack
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Resources whose generated names start with the stack name.
+              - Effect: Allow
+                Action: dynamodb:*
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${StackName}-*'
+              - Effect: Allow
+                Action: lambda:*
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*'
+              - Effect: Allow
+                Action: s3:*
+                Resource: [!Sub 'arn:aws:s3:::${StackName}-*', !Sub 'arn:aws:s3:::${StackName}-*/*']
+              - Effect: Allow
+                Action: logs:*
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/localbargain/${StackName}/*'
+              - Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: '*'
+              # The function roles SAM generates.
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackName}-*'
+              # Only the basic logging policy may be attached, so a function role cannot gain wider managed policies.
+              - Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackName}-*'
+                Condition:
+                  ArnEquals: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole' }
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackName}-*'
+                Condition:
+                  StringEquals: { 'iam:PassedToService': lambda.amazonaws.com }
+              # Lambda reads the packaged code with the deploying identity's rights.
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::localbargain-artifacts-${AWS::AccountId}-${AWS::Region}/*'
+              # These have generated IDs, not names, so they cannot be scoped by name.
+              - Effect: Allow
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE, apigateway:TagResource, apigateway:UntagResource]
+                Resource:
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis'
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/*'
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/tags/*'
+              - Effect: Allow
+                Action: cognito-idp:*
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudfront:*
+                Resource: '*'
+              - Effect: Allow
+                Action: budgets:*
+                Resource: !Sub 'arn:aws:budgets::${AWS::AccountId}:budget/*'
+
+  # What the deploying user runs outside CloudFormation: deploy.sh, the admin script and the smoke tests.
+  DeployerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: localbargain-deployer
+      Users: [!Ref DeployerUserName]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt DeployRole.Arn
+            Condition:
+              StringEquals: { 'iam:PassedToService': cloudformation.amazonaws.com }
+          - Effect: Allow
+            Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath, ssm:PutParameter, ssm:DeleteParameter, ssm:GetParameterHistory]
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/localbargain/*'
+          # deploy.sh creates the artifact bucket on first use and uploads the packaged code to it.
+          - Effect: Allow
+            Action: [s3:CreateBucket, s3:ListBucket, s3:GetBucketLocation, s3:PutObject, s3:GetObject]
+            Resource:
+              - !Sub 'arn:aws:s3:::localbargain-artifacts-${AWS::AccountId}-${AWS::Region}'
+              - !Sub 'arn:aws:s3:::localbargain-artifacts-${AWS::AccountId}-${AWS::Region}/*'
+          # deploy.sh lists identity providers; the smoke tests create, sign in and remove test users.
+          - Effect: Allow
+            Action:
+              - cognito-idp:ListIdentityProviders
+              - cognito-idp:DescribeUserPool
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminGetUser
+              - cognito-idp:AdminDeleteUser
+              - cognito-idp:AdminSetUserPassword
+              - cognito-idp:AdminConfirmSignUp
+              - cognito-idp:AdminInitiateAuth
+              - cognito-idp:AdminRespondToAuthChallenge
+              - cognito-idp:ListUsers
+            Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*'
+          # scripts/admin-create-merchant.sh signs its requests to the IAM-authorised admin routes.
+          - Effect: Allow
+            Action: execute-api:Invoke
+            Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*/admin/*'
+          - Effect: Allow
+            Action: budgets:ViewBudget
+            Resource: !Sub 'arn:aws:budgets::${AWS::AccountId}:budget/localbargain-*'
+          - Effect: Allow
+            Action: [logs:FilterLogEvents, logs:GetLogEvents, logs:DescribeLogStreams, logs:StartLiveTail]
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/localbargain/${StackName}/*'
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn

@@ -11,6 +11,8 @@
 #   apple-key-id           String        optional
 #   apple-private-key      SecureString  optional
 #
+# Runs as the CloudFormation service role from bootstrap.yaml, which must be deployed first (see README).
+#
 # Usage: scripts/deploy.sh
 #   REVIEW_ONLY=1 scripts/deploy.sh   creates the change set and stops, so you can inspect it without changing anything.
 set -euo pipefail
@@ -56,14 +58,23 @@ fi
 # (a deploy without its parameters would delete it, and CloudFormation would still report success).
 node scripts/deploy-parameters.mjs "$ssm_json" "$providers_json" "$prefix" "$params"
 
+# The service role comes from bootstrap.yaml (see README, Deploying). The artifact bucket is made here on first use.
+account="$(aws sts get-caller-identity --query Account --output text | tr -d '\r')"
+role_arn="arn:aws:iam::$account:role/localbargain-cfn-deploy"
+bucket="localbargain-artifacts-$account-$region"
+if ! aws s3api head-bucket --region "$region" --bucket "$bucket" 2>/dev/null; then
+  aws s3api create-bucket --region "$region" --bucket "$bucket" \
+    --create-bucket-configuration LocationConstraint="$region" --output text >/dev/null
+fi
+
 # npm run build puts node_modules/.bin on PATH, so sam finds esbuild.
 npm run build
-sam package --region "$region" --resolve-s3 --output-template-file .aws-sam/packaged.yaml
+sam package --region "$region" --s3-bucket "$bucket" --output-template-file .aws-sam/packaged.yaml
 
 change_set="deploy-$(date +%Y%m%d%H%M%S)"
 aws cloudformation create-change-set --region "$region" --stack-name "$stack" --change-set-name "$change_set" \
   --change-set-type "$change_set_type" --template-body file://.aws-sam/packaged.yaml --parameters file://"$params" \
-  --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND --output text --query Id >/dev/null
+  --role-arn "$role_arn" --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND --output text --query Id >/dev/null
 
 if ! aws cloudformation wait change-set-create-complete --region "$region" --stack-name "$stack" --change-set-name "$change_set" 2>"$err"; then
   reason="$(aws cloudformation describe-change-set --region "$region" --stack-name "$stack" --change-set-name "$change_set" --query StatusReason --output text)"

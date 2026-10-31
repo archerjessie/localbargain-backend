@@ -57,6 +57,15 @@ Rotating the key invalidates every QR value already issued. Each function reads 
 
 ### Deploying
 
+First, once per account, deploy `bootstrap.yaml` with an identity that can manage IAM and CloudFormation:
+
+```sh
+aws cloudformation deploy --region ap-southeast-2 --stack-name localbargain-bootstrap \
+  --template-file bootstrap.yaml --capabilities CAPABILITY_NAMED_IAM
+```
+
+It creates the CloudFormation service role `localbargain-cfn-deploy`, which the app stack deploys as, so the deploying user needs no rights on Lambda, DynamoDB, Cognito, CloudFront or Budgets. It also attaches the `localbargain-deployer` policy to the IAM user `local_bargain` (parameter `DeployerUserName`). That policy covers what runs outside CloudFormation: passing the role, the SSM parameters, the artifact bucket `localbargain-artifacts-<account>-ap-southeast-2`, the admin script, and the smoke tests. After the bootstrap the user also needs `AWSCloudFormationFullAccess`, but no longer needs `IAMFullAccess`.
+
 Always deploy with `scripts/deploy.sh`, never a plain `sam deploy`. The script reads its parameters from SSM under `/localbargain/dev`, so no secrets or personal data sit in this public repository:
 
 | Parameter | Type | |
