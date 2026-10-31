@@ -28,6 +28,12 @@ Rotating the key invalidates every QR value already issued. Each function reads 
 aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].Outputs[?OutputKey=='ImageBucketName'].OutputValue" --output text)" --recursive
 ```
 
+### Consumer sign-in (Cognito)
+
+The consumer user pool uses the **Lite** feature tier, which is set explicitly because new pools default to Essentials. Lite is the lowest tier that supports the classic hosted UI and Google and Apple sign-in. It includes 10,000 monthly active users (MAU) free per account, then costs from USD 0.0055 per MAU (Essentials costs USD 0.015). Google and Apple users count as normal MAUs. Pools created on or before 22 November 2024 keep a legacy free tier of 50,000 MAU.
+
+Google and Apple sign-in are optional. If `GoogleClientId`/`GoogleClientSecret`, or all four `Apple*` parameters, are left empty, that provider is not created, and email and password sign-in still works. `scripts/deploy.sh` (task 8.1) reads the secrets from SSM.
+
 ### Product images and CloudFront
 
 Images live in a private S3 bucket that CloudFront reads through Origin Access Control. The distribution uses `PriceClass_All`, because Australia and New Zealand edge locations are only in that class. `PriceClass_100` and `PriceClass_200` leave them out, so Australian users would be served from Asia or the US. At test traffic the cost stays inside CloudFront's always-free tier: 1 TB of transfer and 10,000,000 requests per month.
