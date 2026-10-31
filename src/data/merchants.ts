@@ -1,7 +1,7 @@
-import { QueryCommand, type QueryCommandOutput } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, QueryCommand, type QueryCommandOutput } from '@aws-sdk/lib-dynamodb';
 import type { MerchantProfile, Offer } from '../domain/types.js';
 import { dynamoClient, tableName } from './clients.js';
-import { offerFromItem, offerKey, profileFromItem, profileKey } from './items.js';
+import { merchantProfileItem, offerFromItem, offerKey, profileFromItem, profileKey } from './items.js';
 
 async function queryAll(input: ConstructorParameters<typeof QueryCommand>[0]) {
   const items: Record<string, unknown>[] = [];
@@ -49,4 +49,10 @@ export async function merchantPartition(merchantId: string): Promise<{ profile: 
   ]);
   const { profiles, offers } = split([...profileItems, ...offerItems]);
   return { profile: profiles[0], offers };
+}
+
+export async function putMerchantProfile(profile: MerchantProfile): Promise<void> {
+  await dynamoClient().send(
+    new PutCommand({ TableName: tableName(), Item: merchantProfileItem(profile), ConditionExpression: 'attribute_not_exists(PK)' }),
+  );
 }
