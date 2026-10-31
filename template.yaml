@@ -282,6 +282,9 @@ Resources:
   # Merchant accounts: created by an admin only, one per shop, email as the username (design D3).
   MerchantUserPool:
     Type: AWS::Cognito::UserPool
+    # A replacement would delete every merchant account, and merchantId is the pool sub. sam delete still removes it.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       UserPoolName: !Sub '${AWS::StackName}-merchants'
       UserPoolTier: LITE
