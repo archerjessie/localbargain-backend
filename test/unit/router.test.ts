@@ -1,9 +1,9 @@
-import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { describe, expect, it, vi } from 'vitest';
 import { json } from '../../src/domain/responses.js';
 import { router } from '../../src/handlers/router.js';
 
-const event = (routeKey: string) => ({ routeKey }) as APIGatewayProxyEventV2;
+const event = (routeKey: string) => ({ routeKey }) as APIGatewayProxyEventV2WithJWTAuthorizer;
 
 describe('router', () => {
   it('dispatches on routeKey', async () => {
