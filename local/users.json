@@ -1,0 +1,6 @@
+[
+  { "sub": "local-consumer-1", "email": "consumer1@localbargain.test", "displayName": "Alex", "pool": "consumer" },
+  { "sub": "local-consumer-2", "email": "consumer2@localbargain.test", "displayName": "Sam", "pool": "consumer" },
+  { "sub": "local-merchant-1", "email": "merchant1@localbargain.test", "displayName": "Bean There Melbourne", "pool": "merchant" },
+  { "sub": "local-merchant-2", "email": "merchant2@localbargain.test", "displayName": "Harbour Bakery Sydney", "pool": "merchant" }
+]

@@ -85,6 +85,9 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: !Ref Table
+        # Local mode only (design D9). sam local overrides these from local/env.json; deployed they stay empty.
+        LOCAL_AUTH: '0'
+        DYNAMODB_ENDPOINT: ''
 
 Resources:
   # Single table, on demand (design D5).
@@ -476,10 +479,12 @@ Resources:
         Variables:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
           CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
+          QR_KEY: ''
       Policies:
         - Statement:
+            # AdminGetUser or ListUsers finds the consumer by sub (federated usernames differ from the sub), then AdminDeleteUser removes it.
             - Effect: Allow
-              Action: cognito-idp:AdminDeleteUser
+              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers, cognito-idp:AdminDeleteUser]
               Resource: !GetAtt ConsumerUserPool.Arn
             # GetItem checks an offer before issuing a QR value. Query reads history from GSI1.
             - Effect: Allow
@@ -585,6 +590,11 @@ Resources:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
           IMAGE_BUCKET: !Ref ImageBucket
           CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
+          QR_KEY: ''
+          S3_ENDPOINT: ''
+          S3_PUBLIC_ENDPOINT: ''
+          S3_ACCESS_KEY_ID: ''
+          S3_SECRET_ACCESS_KEY: ''
           IMAGE_BASE_URL: !Sub 'https://${ImageDistribution.DomainName}/'
       Policies:
         - Statement:
@@ -594,8 +604,10 @@ Resources:
             - Effect: Allow
               Action: ssm:GetParameter
               Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${QrKeyParameterName}'
+            # The scan looks the consumer up by sub: AdminGetUser for native users, ListUsers for federated ones (design D4).
+            # Accepted risk: IAM cannot limit ListUsers to one sub, so this role can list the consumer directory.
             - Effect: Allow
-              Action: cognito-idp:AdminGetUser
+              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers]
               Resource: !GetAtt ConsumerUserPool.Arn
             # PutObject signs the presigned POST, GetObject backs HeadObject. The merchant-ID prefix is checked in code.
             - Effect: Allow

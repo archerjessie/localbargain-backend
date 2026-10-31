@@ -23,9 +23,15 @@
     "lint": "eslint . && redocly lint openapi.yaml",
     "test": "vitest run --passWithNoTests",
     "build": "sam build --parallel --cached",
-    "validate": "sam validate --lint"
+    "validate": "sam validate --lint",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1161.0",
+    "@aws-sdk/client-dynamodb": "^3.1161.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/client-ssm": "^3.1161.0",
+    "@aws-sdk/lib-dynamodb": "^3.1161.0",
     "zod": "^4.6.7"
   }
 }
