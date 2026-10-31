@@ -1,10 +1,13 @@
 // Consumer Lambda: the signed-in consumer's profile, QR codes, history, and account deletion (design D2).
+import { consumerHistory, InvalidCursorError } from '../data/history.js';
 import { getOffer } from '../data/offers.js';
 import { qrKey } from '../data/qrKey.js';
 import { anonymiseConsumer } from '../data/redemptions.js';
 import { errorResponse } from '../domain/errors.js';
 import { signQr } from '../domain/qr.js';
 import { json, noContent } from '../domain/responses.js';
+import { cursorQuery, parseRequest } from '../domain/validation.js';
+import { consumerRedemptionView } from '../domain/views.js';
 import { getCaller } from '../identity/caller.js';
 import { identity } from '../identity/identity.js';
 import { router } from './router.js';
@@ -28,6 +31,20 @@ export const handler = router({
     await anonymiseConsumer(caller.caller.sub);
     await identity().deleteConsumer(caller.caller.sub);
     return noContent();
+  },
+
+  'GET /me/redemptions': async (event) => {
+    const caller = getCaller(event, 'consumer');
+    if (!caller.ok) return caller.response;
+    const query = parseRequest(cursorQuery, event.queryStringParameters ?? {});
+    if (!query.ok) return query.response;
+    try {
+      const { items, nextCursor } = await consumerHistory(caller.caller.sub, query.data.cursor);
+      return json(200, { items: items.map(consumerRedemptionView), ...(nextCursor ? { nextCursor } : {}) });
+    } catch (error) {
+      if (error instanceof InvalidCursorError) return errorResponse(400, 'validation_error', 'cursor is not a valid cursor for this history');
+      throw error;
+    }
   },
 
   // Design D10: the merchantId in the path finds the offer, which is keyed by merchant. Only active offers get a code.
