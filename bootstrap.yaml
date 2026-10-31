@@ -19,6 +19,11 @@ Resources:
   # Used by CloudFormation only. Its name does not start with the stack name, so the role cannot change itself.
   DeployRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          # cfn-lint does not know apigateway:TagResource, but creating an HTTP API stage needs it.
+          ignore_checks: [W3037]
     Properties:
       RoleName: localbargain-cfn-deploy
       AssumeRolePolicyDocument:
@@ -87,7 +92,7 @@ Resources:
                 Resource: !Sub 'arn:aws:s3:::localbargain-artifacts-${AWS::AccountId}-${AWS::Region}/*'
               # These have generated IDs, not names, so they cannot be scoped by name.
               - Effect: Allow
-                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE]
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE, apigateway:TagResource, apigateway:UntagResource]
                 Resource:
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis'
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/*'
