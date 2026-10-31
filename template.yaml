@@ -336,6 +336,30 @@ Resources:
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
 
+  # One HTTP API. A token from the wrong pool fails the issuer and audience check, so it gets 401 before any Lambda runs (design D3).
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # Cost guard (design D8): caps the worst-case bill for the whole stage.
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 10
+        ThrottlingBurstLimit: 20
+      Auth:
+        EnableIamAuthorizer: true
+        Authorizers:
+          ConsumerAuth:
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${ConsumerUserPool}'
+              # Cognito access tokens carry client_id instead of aud. API Gateway checks either one.
+              audience: [!Ref ConsumerAppClient]
+            IdentitySource: $request.header.Authorization
+          MerchantAuth:
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${MerchantUserPool}'
+              # Cognito access tokens carry client_id instead of aud. API Gateway checks either one.
+              audience: [!Ref MerchantAppClient]
+            IdentitySource: $request.header.Authorization
+
   # Four functions grouped by audience (design D2). Each gets only the access its routes need.
   DiscoveryFunction:
     Type: AWS::Serverless::Function
@@ -351,6 +375,39 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: discovery.handler
+      Events:
+        ListCategories:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /categories
+            Auth:
+              Authorizer: NONE
+        DiscoverOffers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /discovery
+            Auth:
+              Authorizer: ConsumerAuth
+        SearchLocations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /locations
+            Auth:
+              Authorizer: ConsumerAuth
+        GetMerchant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /merchants/{merchantId}
+            Auth:
+              Authorizer: ConsumerAuth
       LoggingConfig:
         LogGroup: !Ref DiscoveryLogGroup
       Environment:
@@ -378,6 +435,39 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: consumer.handler
+      Events:
+        GetOfferQr:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /merchants/{merchantId}/offers/{offerId}/qr
+            Auth:
+              Authorizer: ConsumerAuth
+        GetMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /me
+            Auth:
+              Authorizer: ConsumerAuth
+        DeleteMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: DELETE
+            Path: /me
+            Auth:
+              Authorizer: ConsumerAuth
+        ListMyRedemptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /me/redemptions
+            Auth:
+              Authorizer: ConsumerAuth
       LoggingConfig:
         LogGroup: !Ref ConsumerLogGroup
       Environment:
@@ -421,6 +511,71 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: merchant.handler
+      Events:
+        GetMerchantMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /merchant/me
+            Auth:
+              Authorizer: MerchantAuth
+        ListMerchantOffers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /merchant/offers
+            Auth:
+              Authorizer: MerchantAuth
+        CreateOffer:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /merchant/offers
+            Auth:
+              Authorizer: MerchantAuth
+        UpdateOffer:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: PATCH
+            Path: /merchant/offers/{offerId}
+            Auth:
+              Authorizer: MerchantAuth
+        DeleteOffer:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: DELETE
+            Path: /merchant/offers/{offerId}
+            Auth:
+              Authorizer: MerchantAuth
+        RequestOfferImageUpload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /merchant/offers/{offerId}/image
+            Auth:
+              Authorizer: MerchantAuth
+        ListMerchantRedemptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /merchant/redemptions
+            Auth:
+              Authorizer: MerchantAuth
+        RecordRedemption:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /merchant/redemptions
+            Auth:
+              Authorizer: MerchantAuth
       LoggingConfig:
         LogGroup: !Ref MerchantLogGroup
       Environment:
@@ -459,6 +614,15 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: admin.handler
+      Events:
+        CreateMerchant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /admin/merchants
+            Auth:
+              Authorizer: AWS_IAM
       LoggingConfig:
         LogGroup: !Ref AdminLogGroup
       Environment:
@@ -495,6 +659,8 @@ Resources:
       RetentionInDays: 14
 
 Outputs:
+  ApiUrl:
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com'
   MerchantUserPoolId:
     Value: !Ref MerchantUserPool
   MerchantAppClientId:
