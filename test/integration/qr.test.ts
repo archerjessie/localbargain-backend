@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { deleteOffer } from '../../src/data/offers.js';
 import { verifyQr } from '../../src/domain/qr.js';
 import { handler } from '../../src/handlers/consumer.js';
 import { expectContract } from '../support/contract.js';
@@ -17,8 +18,8 @@ let drop: () => Promise<void>;
 beforeAll(async () => {
   ({ drop } = await createTestTable());
   await putItems(
-    [merchantAt('m1', { lat: -37.8136, lng: 144.9631 }, 0)],
-    [testOffer('m1', 'o1'), testOffer('m1', 'o2'), testOffer('m1', 'inactive', { active: false })],
+    [merchantAt('m1', { lat: -37.8136, lng: 144.9631 }, 0), merchantAt('m2', { lat: -37.8136, lng: 144.9631 }, 1)],
+    [testOffer('m1', 'o1'), testOffer('m1', 'o2'), testOffer('m1', 'inactive', { active: false }), testOffer('m2', 'm2-offer')],
   );
 });
 afterAll(async () => drop?.());
@@ -43,6 +44,7 @@ describe('GET /merchants/{merchantId}/offers/{offerId}/qr', () => {
   it.each([
     ['an inactive offer', 'm1', 'inactive'],
     ['an unknown offer', 'm1', 'nope'],
+    // m2 exists with its own offer, so this shows the lookup is scoped to the merchant in the path.
     ['an offer under the wrong merchant', 'm2', 'o1'],
   ])('answers 404 for %s', async (_, merchantId, offerId) => {
     const response = await qr(merchantId, offerId);
@@ -53,9 +55,7 @@ describe('GET /merchants/{merchantId}/offers/{offerId}/qr', () => {
   it('answers 404 once the offer is deleted', async () => {
     await putItems([], [testOffer('m1', 'short-lived')]);
     expect((await qr('m1', 'short-lived')).statusCode).toBe(200);
-    const { DeleteCommand } = await import('@aws-sdk/lib-dynamodb');
-    const { dynamoClient, tableName } = await import('../../src/data/clients.js');
-    await dynamoClient().send(new DeleteCommand({ TableName: tableName(), Key: { PK: 'MERCHANT#m1', SK: 'OFFER#short-lived' } }));
+    await deleteOffer('m1', 'short-lived');
     expect((await qr('m1', 'short-lived')).statusCode).toBe(404);
   });
 
