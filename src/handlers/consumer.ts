@@ -1,12 +1,15 @@
 // Consumer Lambda: the signed-in consumer's profile, QR codes, history, and account deletion (design D2).
+import { consumerHistory } from '../data/history.js';
 import { getOffer } from '../data/offers.js';
 import { qrKey } from '../data/qrKey.js';
 import { anonymiseConsumer } from '../data/redemptions.js';
 import { errorResponse } from '../domain/errors.js';
 import { signQr } from '../domain/qr.js';
 import { json, noContent } from '../domain/responses.js';
+import { consumerRedemptionView } from '../domain/views.js';
 import { getCaller } from '../identity/caller.js';
 import { identity } from '../identity/identity.js';
+import { historyRoute } from './historyRoute.js';
 import { router } from './router.js';
 
 export const handler = router({
@@ -29,6 +32,8 @@ export const handler = router({
     await identity().deleteConsumer(caller.caller.sub);
     return noContent();
   },
+
+  'GET /me/redemptions': historyRoute('consumer', consumerHistory, consumerRedemptionView),
 
   // Design D10: the merchantId in the path finds the offer, which is keyed by merchant. Only active offers get a code.
   'GET /merchants/{merchantId}/offers/{offerId}/qr': async (event) => {
