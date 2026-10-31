@@ -1,10 +1,17 @@
 // Merchant Lambda: the signed-in merchant's shop, offers, and redemptions (design D2).
-import { getMerchantProfile } from '../data/merchants.js';
+import { randomUUID } from 'node:crypto';
+import { imageBaseUrl } from '../data/clients.js';
+import { getMerchantProfile, merchantPartition } from '../data/merchants.js';
+import { deleteOffer, getOffer, putOffer } from '../data/offers.js';
 import { errorResponse } from '../domain/errors.js';
-import { json } from '../domain/responses.js';
-import { merchantView } from '../domain/views.js';
+import { json, noContent } from '../domain/responses.js';
+import type { Offer } from '../domain/types.js';
+import { offerCreate, offerUpdate, parseJsonBody } from '../domain/validation.js';
+import { merchantView, offerView } from '../domain/views.js';
 import { getCaller } from '../identity/caller.js';
 import { router } from './router.js';
+
+const offerNotFound = () => errorResponse(404, 'not_found', 'Offer not found');
 
 export const handler = router({
   'GET /merchant/me': async (event) => {
@@ -14,5 +21,61 @@ export const handler = router({
     const profile = await getMerchantProfile(caller.caller.sub);
     if (!profile) return errorResponse(404, 'not_found', 'No shop profile for this merchant account');
     return json(200, merchantView(profile));
+  },
+
+  'GET /merchant/offers': async (event) => {
+    const caller = getCaller(event, 'merchant');
+    if (!caller.ok) return caller.response;
+    const { offers } = await merchantPartition(caller.caller.sub);
+    return json(200, { items: offers.map((offer) => offerView(offer, imageBaseUrl())) });
+  },
+
+  'POST /merchant/offers': async (event) => {
+    const caller = getCaller(event, 'merchant');
+    if (!caller.ok) return caller.response;
+    const body = parseJsonBody(offerCreate, event.body, event.isBase64Encoded);
+    if (!body.ok) return body.response;
+    // An offer without a shop profile would never show in discovery.
+    if (!(await getMerchantProfile(caller.caller.sub))) {
+      return errorResponse(404, 'not_found', 'No shop profile for this merchant account');
+    }
+    const now = new Date().toISOString();
+    const { description, ...fields } = body.data;
+    const offer: Offer = {
+      ...fields,
+      ...(description ? { description } : {}),
+      offerId: randomUUID(),
+      merchantId: caller.caller.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await putOffer(offer, 'create');
+    return json(201, offerView(offer, imageBaseUrl()));
+  },
+
+  'PATCH /merchant/offers/{offerId}': async (event) => {
+    const caller = getCaller(event, 'merchant');
+    if (!caller.ok) return caller.response;
+    const body = parseJsonBody(offerUpdate, event.body, event.isBase64Encoded);
+    if (!body.ok) return body.response;
+    const current = await getOffer(caller.caller.sub, event.pathParameters?.offerId ?? '');
+    if (!current) return offerNotFound();
+    const { description, imageKey, ...fields } = body.data;
+    if (imageKey !== undefined) return errorResponse(400, 'validation_error', 'imageKey is not supported yet');
+    // Absent fields stay as they are, so drop the undefined ones before merging.
+    const changes = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Partial<Offer>;
+    const updated: Offer = { ...current, ...changes, updatedAt: new Date().toISOString() };
+    if (description === null) delete updated.description;
+    else if (description !== undefined) updated.description = description;
+    await putOffer(updated, 'replace');
+    return json(200, offerView(updated, imageBaseUrl()));
+  },
+
+  'DELETE /merchant/offers/{offerId}': async (event) => {
+    const caller = getCaller(event, 'merchant');
+    if (!caller.ok) return caller.response;
+    // Redemptions copied the offer's values at scan time, so deleting it leaves them unchanged.
+    const deleted = await deleteOffer(caller.caller.sub, event.pathParameters?.offerId ?? '');
+    return deleted ? noContent() : offerNotFound();
   },
 });
