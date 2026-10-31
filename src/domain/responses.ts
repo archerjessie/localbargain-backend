@@ -7,3 +7,7 @@ export interface JsonResponse {
 export function json(statusCode: number, body: unknown): JsonResponse {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
+
+export function noContent(): JsonResponse {
+  return { statusCode: 204, headers: {}, body: '' };
+}

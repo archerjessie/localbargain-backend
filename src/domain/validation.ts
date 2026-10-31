@@ -15,7 +15,13 @@ const productName = text(80);
 const categoryId = z.enum(categoryIds);
 const percentOff = z.int().min(1).max(99);
 const originalPriceCents = z.int().min(1).max(1_000_000);
-const description = z.string().max(200).nullable();
+// An empty or blank description means "no description", the same as null.
+const description = z
+  .string()
+  .trim()
+  .max(200)
+  .transform((text) => (text === '' ? null : text))
+  .nullable();
 // Plain ID characters only in each segment, so no . or .. segments. The handler also checks the merchant and offer prefix.
 const imageKey = z.string().regex(/^offers\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\.(jpg|png|webp)$/);
 
