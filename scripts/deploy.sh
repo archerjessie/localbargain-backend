@@ -32,6 +32,8 @@ trap 'rm -f "$params" "$err"' EXIT
 umask 077
 
 die() { echo "deploy: $*" >&2; exit 1; }
+# Git Bash on Windows finds the SAM CLI only as sam.cmd.
+command -v sam >/dev/null || sam() { sam.cmd "$@"; }
 
 # JSON output throughout: no CRLF from aws.exe on Windows, and stderr never mixes into a value.
 ssm_json="$(aws ssm get-parameters-by-path --region "$region" --path "$prefix" --with-decryption --output json 2>"$err")" ||
@@ -62,7 +64,7 @@ node scripts/deploy-parameters.mjs "$ssm_json" "$providers_json" "$prefix" "$par
 account="$(aws sts get-caller-identity --query Account --output text | tr -d '\r')"
 role_arn="arn:aws:iam::$account:role/localbargain-cfn-deploy"
 bucket="localbargain-artifacts-$account-$region"
-if ! aws s3api head-bucket --region "$region" --bucket "$bucket" 2>/dev/null; then
+if ! aws s3api head-bucket --region "$region" --bucket "$bucket" >/dev/null 2>&1; then
   aws s3api create-bucket --region "$region" --bucket "$bucket" \
     --create-bucket-configuration LocationConstraint="$region" --output text >/dev/null
 fi

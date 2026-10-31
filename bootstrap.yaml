@@ -34,6 +34,10 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # The app template uses the SAM transform, which CloudFormation runs as this role.
+              - Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31'
               # Resources whose generated names start with the stack name.
               - Effect: Allow
                 Action: dynamodb:*
