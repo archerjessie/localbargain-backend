@@ -1,4 +1,5 @@
 // Admin Lambda: creates merchant accounts. Called with SigV4 through the IAM authorizer (design D3).
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 import { putMerchantProfile } from '../data/merchants.js';
 import { errorResponse } from '../domain/errors.js';
 import { geohash } from '../domain/geo.js';
@@ -8,11 +9,13 @@ import { merchantCreate, parseJsonBody } from '../domain/validation.js';
 import { identity, MerchantEmailTakenError, type Identity } from '../identity/identity.js';
 import { router, type Route } from './router.js';
 
+type AdminEvent = APIGatewayProxyEventV2WithIAMAuthorizer;
+
 export function createMerchantRoute(deps: {
   identity: Identity;
   saveProfile: (profile: MerchantProfile) => Promise<void>;
   now: () => string;
-}): Route {
+}): Route<AdminEvent> {
   return async (event) => {
     const body = parseJsonBody(merchantCreate, event.body, event.isBase64Encoded);
     if (!body.ok) return body.response;
@@ -38,9 +41,9 @@ export function createMerchantRoute(deps: {
   };
 }
 
-let createMerchant: Route | undefined;
+let createMerchant: Route<AdminEvent> | undefined;
 
-export const handler = router({
+export const handler = router<AdminEvent>({
   'POST /admin/merchants': (event) => {
     createMerchant ??= createMerchantRoute({ identity: identity(), saveProfile: putMerchantProfile, now: () => new Date().toISOString() });
     return createMerchant(event);

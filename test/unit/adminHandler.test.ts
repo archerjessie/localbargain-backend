@@ -4,6 +4,7 @@ import {
   UsernameExistsException,
   type CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 import { describe, expect, it, vi } from 'vitest';
 import type { MerchantProfile } from '../../src/domain/types.js';
 import { createMerchantRoute } from '../../src/handlers/admin.js';
@@ -11,6 +12,9 @@ import { router } from '../../src/handlers/router.js';
 import { cognitoIdentity } from '../../src/identity/identity.js';
 import { expectContract } from '../support/contract.js';
 import { apiEvent, bodyOf } from '../support/events.js';
+
+// The admin route sits behind the IAM authorizer, so its event carries no JWT claims.
+const adminEvent = (b: unknown) => apiEvent('POST /admin/merchants', { body: b }) as unknown as APIGatewayProxyEventV2WithIAMAuthorizer;
 
 const body = {
   name: 'Bean There', shopType: 'cafe', street: '211 Swanston St', suburb: 'Melbourne', state: 'VIC',
@@ -30,7 +34,7 @@ function setup(opts: { cognito?: (command: unknown) => unknown; save?: (p: Merch
   });
   // Through the router, which turns a thrown error into the 500 response.
   const handler = router({ 'POST /admin/merchants': route });
-  return { route, send, saveProfile, call: () => handler(apiEvent('POST /admin/merchants', { body })) };
+  return { route, send, saveProfile, call: () => handler(adminEvent(body)) };
 }
 
 describe('POST /admin/merchants', () => {
@@ -76,7 +80,7 @@ describe('POST /admin/merchants', () => {
 
   it.each([{ lat: 51.5 }, { lng: -0.12 }, { postcode: '300' }])('answers %j with 400 and creates nothing', async (patch) => {
     const { route, send, saveProfile } = setup();
-    const response = await route(apiEvent('POST /admin/merchants', { body: { ...body, ...patch } }));
+    const response = await route(adminEvent({ ...body, ...patch }));
     expect(response.statusCode).toBe(400);
     expectContract('POST', '/admin/merchants', 400, bodyOf(response));
     expect(send).not.toHaveBeenCalled();
