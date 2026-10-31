@@ -23,7 +23,8 @@
     "lint": "eslint . && redocly lint openapi.yaml",
     "test": "vitest run --passWithNoTests",
     "build": "sam build --parallel --cached",
-    "validate": "sam validate --lint"
+    "validate": "sam validate --lint",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1161.0",
