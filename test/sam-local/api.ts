@@ -7,7 +7,7 @@ export async function call(method: string, path: string, opts: { as?: string; bo
       ...(opts.as ? { 'x-debug-sub': opts.as } : {}),
       ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : undefined };
