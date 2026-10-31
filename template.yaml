@@ -279,6 +279,46 @@ Resources:
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
 
+  # Merchant accounts: created by an admin only, one per shop, email as the username (design D3).
+  MerchantUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-merchants'
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        # No self-signup. AdminCreateUser emails a temporary password, and the first sign-in must set a new one.
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: Your LocalBargain merchant account
+          EmailMessage: 'Your LocalBargain merchant account is ready. Sign in to the merchant app with {username} and the temporary password {####}. You will be asked to choose a new password.'
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - { Name: verified_email, Priority: 1 }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+
+  MerchantAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref MerchantUserPool
+      ClientName: merchant-app
+      GenerateSecret: false
+      # SRP keeps the password off the wire. ADMIN_USER_PASSWORD_AUTH needs IAM credentials, for operator smoke tests only.
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      SupportedIdentityProviders: [COGNITO]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+
   # Four functions grouped by audience (design D2). Each gets only the access its routes need.
   DiscoveryFunction:
     Type: AWS::Serverless::Function
@@ -404,8 +444,14 @@ Resources:
       Handler: admin.handler
       LoggingConfig:
         LogGroup: !Ref AdminLogGroup
+      Environment:
+        Variables:
+          MERCHANT_USER_POOL_ID: !Ref MerchantUserPool
       Policies:
         - Statement:
+            - Effect: Allow
+              Action: [cognito-idp:AdminCreateUser, cognito-idp:AdminDeleteUser]
+              Resource: !GetAtt MerchantUserPool.Arn
             - Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt Table.Arn
@@ -432,6 +478,10 @@ Resources:
       RetentionInDays: 14
 
 Outputs:
+  MerchantUserPoolId:
+    Value: !Ref MerchantUserPool
+  MerchantAppClientId:
+    Value: !Ref MerchantAppClient
   ConsumerUserPoolId:
     Value: !Ref ConsumerUserPool
   ConsumerAppClientId:
