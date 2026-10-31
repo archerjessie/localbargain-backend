@@ -1,7 +1,8 @@
 // Discovery Lambda: reference data and finding merchants (design D2).
 import { imageBaseUrl } from '../data/clients.js';
-import { discoveryCandidates } from '../data/merchants.js';
+import { discoveryCandidates, merchantPartition } from '../data/merchants.js';
 import { discover } from '../domain/discovery.js';
+import { errorResponse } from '../domain/errors.js';
 import { searchLocalities } from '../domain/localitySearch.js';
 import { json } from '../domain/responses.js';
 import { discoveryQuery, locationsQuery, parseRequest } from '../domain/validation.js';
@@ -35,5 +36,16 @@ export const handler = router({
       distanceMetres: found.distanceMetres,
     }));
     return json(200, { items });
+  },
+
+  'GET /merchants/{merchantId}': async (event) => {
+    const caller = getCaller(event, 'consumer');
+    if (!caller.ok) return caller.response;
+    const { profile, offers } = await merchantPartition(event.pathParameters?.merchantId ?? '');
+    if (!profile) return errorResponse(404, 'not_found', 'Merchant not found');
+    return json(200, {
+      ...merchantView(profile),
+      offers: offers.filter((offer) => offer.active).map((offer) => offerView(offer, imageBaseUrl())),
+    });
   },
 });
