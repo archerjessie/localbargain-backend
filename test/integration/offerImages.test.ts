@@ -1,4 +1,6 @@
+import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { s3Client } from '../../src/data/clients.js';
 import { handler } from '../../src/handlers/merchant.js';
 import { expectContract } from '../support/contract.js';
 import { apiEvent, bodyOf } from '../support/events.js';
@@ -37,7 +39,15 @@ beforeAll(async () => {
     ['o1', 'o2', 'o3', 'o4', 'o5', 'o6'].map((id) => testOffer('merchant-a', id)).concat(testOffer('merchant-b', 'b1')),
   );
 });
-afterAll(async () => drop?.());
+// The bucket outlives the test, so remove everything this file uploaded.
+afterAll(async () => {
+  await drop?.();
+  for (const Prefix of ['offers/merchant-a/', 'offers/merchant-b/']) {
+    const Bucket = process.env.IMAGE_BUCKET!;
+    const { Contents } = await s3Client().send(new ListObjectsV2Command({ Bucket, Prefix }));
+    if (Contents?.length) await s3Client().send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: Contents.map(({ Key }) => ({ Key })) } }));
+  }
+});
 
 describe('POST /merchant/offers/{offerId}/image', () => {
   it('returns a presigned upload for a key under this merchant and offer', async () => {
@@ -94,6 +104,16 @@ describe('attaching an image with PATCH imageKey', () => {
     }
     form.append('file', new Blob(['<script>'], { type: 'text/html' }));
     expect((await fetch(grant.upload.url, { method: 'POST', body: form })).status).toBeGreaterThanOrEqual(400);
+    expect(await served(grant.imageKey)).toBe(false);
+    expect((await patch('o3', { imageKey: grant.imageKey })).statusCode).toBe(400);
+  });
+
+  it('accepts exactly 2,097,152 bytes and refuses one byte more', async () => {
+    const atLimit = bodyOf(await requestUpload('o4', 'image/jpeg'));
+    expect((await upload(atLimit, 2 * 1024 * 1024)).status).toBeLessThan(300);
+    const overLimit = bodyOf(await requestUpload('o4', 'image/jpeg'));
+    expect((await upload(overLimit, 2 * 1024 * 1024 + 1)).status).toBeGreaterThanOrEqual(400);
+    expect(await served(overLimit.imageKey)).toBe(false);
   });
 
   it("answers 400 for another merchant's or offer's key and for a missing upload, and changes nothing", async () => {

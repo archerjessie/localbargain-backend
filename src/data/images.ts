@@ -21,6 +21,8 @@ function bucket(): string {
 export const imageKeyPrefix = (merchantId: string, offerId: string) => `offers/${merchantId}/${offerId}/`;
 
 // POST, not PUT: only a POST policy can cap the size. A new key per upload means CloudFront never serves a stale image.
+// Accepted risk: a grant stays usable for its 5 minutes, so the same merchant could overwrite their own key in that
+// window (or recreate it after a delete, leaving an orphan). Only that merchant holds the grant.
 export async function createImageUpload(merchantId: string, offerId: string, contentType: ImageContentType) {
   const imageKey = `${imageKeyPrefix(merchantId, offerId)}${randomUUID()}.${EXTENSION[contentType]}`;
   const expiresAt = new Date(Date.now() + EXPIRES_SECONDS * 1000).toISOString();
@@ -28,10 +30,8 @@ export async function createImageUpload(merchantId: string, offerId: string, con
     Bucket: bucket(),
     Key: imageKey,
     Fields: { 'Content-Type': contentType },
-    Conditions: [
-      ['content-length-range', 1, MAX_BYTES],
-      ['eq', '$Content-Type', contentType],
-    ],
+    // createPresignedPost already adds an exact-match condition for every entry in Fields, Content-Type included.
+    Conditions: [['content-length-range', 1, MAX_BYTES]],
     Expires: EXPIRES_SECONDS,
   });
   return { imageKey, upload: { url: upload.url, fields: upload.fields }, expiresAt };
@@ -42,9 +42,9 @@ export async function imageExists(key: string): Promise<boolean> {
     await s3Client().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
     return true;
   } catch (error) {
-    // Without s3:ListBucket, S3 answers a missing key with 403 rather than 404.
+    // The merchant role has s3:ListBucket on offers/, so a missing key is 404. A 403 is a real permission problem and is raised.
     const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status === 403 || status === 404) return false;
+    if (status === 404) return false;
     throw error;
   }
 }

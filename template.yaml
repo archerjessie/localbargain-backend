@@ -622,6 +622,11 @@ Resources:
             - Effect: Allow
               Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
               Resource: !Sub '${ImageBucket.Arn}/offers/*'
+            # Without ListBucket, HeadObject answers a missing key with 403, which looks like a permission error.
+            # No s3:prefix condition: HeadObject sends no prefix, so the condition would never match. The bucket holds only offers/.
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImageBucket.Arn
 
   AdminFunction:
     Type: AWS::Serverless::Function
