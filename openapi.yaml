@@ -2,9 +2,755 @@ openapi: 3.1.0
 info:
   title: LocalBargain API
   version: 0.1.0
+  description: |
+    Contract for the LocalBargain consumer and merchant apps.
+
+    Every error from a handler uses the `Error` shape. A 401 from the API Gateway
+    JWT authorizer is produced before any handler runs, so its body is
+    `{"message": "Unauthorized"}` with no `code`.
+
+    Prices are whole AUD cents. `discountedPriceCents` is computed from
+    `originalPriceCents` and `percentOff` (rounded half up) and is never accepted as input.
   license:
     name: UNLICENSED
     identifier: UNLICENSED
 servers:
   - url: http://localhost:3000
-paths: {}
+    description: Local mode (`sam local start-api`). The Android emulator uses http://10.0.2.2:3000.
+tags:
+  - name: reference
+    description: Static platform data. No sign-in needed.
+  - name: discovery
+    description: Finding merchants and offers. Consumer sign-in needed.
+  - name: consumer
+    description: The signed-in consumer's account, QR codes, and history.
+  - name: merchant
+    description: The signed-in merchant's shop, offers, and redemptions.
+  - name: admin
+    description: Platform administration, signed with AWS credentials.
+
+paths:
+  /categories:
+    get:
+      tags: [reference]
+      operationId: listCategories
+      summary: List the fixed product categories
+      security: []
+      responses:
+        '200':
+          description: Every category
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '429':
+          description: The API-wide throttle (10 requests per second, burst 20) was exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GatewayError' }
+
+  /discovery:
+    get:
+      tags: [discovery]
+      operationId: discoverOffers
+      summary: Merchants with active offers near a point, nearest first
+      security:
+        - ConsumerAuth: []
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: lng
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - name: radiusMetres
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50000, default: 5000 }
+      responses:
+        '200':
+          description: Up to 100 merchants, nearest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: '#/components/schemas/DiscoveryMerchant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /locations:
+    get:
+      tags: [discovery]
+      operationId: searchLocations
+      summary: Search Australian localities by postcode or suburb prefix
+      description: A 4-digit query matches postcodes exactly. Anything else matches suburb names by case-insensitive prefix. At most 20 results.
+      security:
+        - ConsumerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 60 }
+      responses:
+        '200':
+          description: Matching localities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 20
+                    items: { $ref: '#/components/schemas/Locality' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /merchants/{merchantId}:
+    get:
+      tags: [discovery]
+      operationId: getMerchant
+      summary: One merchant's shop details and active offers
+      security:
+        - ConsumerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MerchantId'
+      responses:
+        '200':
+          description: The merchant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MerchantWithOffers' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchants/{merchantId}/offers/{offerId}/qr:
+    get:
+      tags: [consumer]
+      operationId: getOfferQr
+      summary: The caller's signed QR value for one active offer
+      description: The value is the same on every call for the same consumer and offer.
+      security:
+        - ConsumerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MerchantId'
+        - $ref: '#/components/parameters/OfferId'
+      responses:
+        '200':
+          description: The QR value
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [qrValue]
+                properties:
+                  qrValue:
+                    type: string
+                    examples: ['lb1.local-consumer-1.01J9Z8Q4K7.abc123']
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me:
+    get:
+      tags: [consumer]
+      operationId: getMe
+      summary: The signed-in consumer's profile
+      security:
+        - ConsumerAuth: []
+      responses:
+        '200':
+          description: The profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsumerProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [consumer]
+      operationId: deleteMe
+      summary: Delete the signed-in consumer's account
+      description: Past redemptions stay in merchant history with no user ID or display name. Safe to retry.
+      security:
+        - ConsumerAuth: []
+      responses:
+        '204':
+          description: Account deleted
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/redemptions:
+    get:
+      tags: [consumer]
+      operationId: listMyRedemptions
+      summary: The signed-in consumer's redemptions, newest first
+      security:
+        - ConsumerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of redemptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 20
+                    items: { $ref: '#/components/schemas/ConsumerRedemption' }
+                  nextCursor: { $ref: '#/components/schemas/NextCursor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /merchant/me:
+    get:
+      tags: [merchant]
+      operationId: getMerchantMe
+      summary: The signed-in merchant's shop profile
+      security:
+        - MerchantAuth: []
+      responses:
+        '200':
+          description: The shop
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Merchant' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/offers:
+    get:
+      tags: [merchant]
+      operationId: listMerchantOffers
+      summary: All of the shop's offers, active and inactive
+      security:
+        - MerchantAuth: []
+      responses:
+        '200':
+          description: Every offer of the shop
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Offer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [merchant]
+      operationId: createOffer
+      summary: Create an offer
+      description: New offers are active unless `active` is false, and have no image.
+      security:
+        - MerchantAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferCreate' }
+      responses:
+        '201':
+          description: The created offer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Offer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /merchant/offers/{offerId}:
+    parameters:
+      - $ref: '#/components/parameters/OfferId'
+    patch:
+      tags: [merchant]
+      operationId: updateOffer
+      summary: Change fields of one of the shop's offers
+      description: |
+        Setting `imageKey` attaches an uploaded image. The key must come from
+        `POST /merchant/offers/{offerId}/image` for this offer, and the upload must exist.
+        Setting `imageKey` to null removes the image.
+      security:
+        - MerchantAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferUpdate' }
+      responses:
+        '200':
+          description: The updated offer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Offer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [merchant]
+      operationId: deleteOffer
+      summary: Delete one of the shop's offers
+      description: Past redemptions of the offer are kept unchanged.
+      security:
+        - MerchantAuth: []
+      responses:
+        '204':
+          description: Offer deleted
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/offers/{offerId}/image:
+    parameters:
+      - $ref: '#/components/parameters/OfferId'
+    post:
+      tags: [merchant]
+      operationId: requestOfferImageUpload
+      summary: Get a presigned upload for an offer image
+      description: |
+        Send a multipart/form-data POST to `upload.url` with every entry of
+        `upload.fields`, then the file as the last field, named `file`. The upload
+        expires after 5 minutes and accepts at most 2,097,152 bytes. Then attach it
+        with `PATCH /merchant/offers/{offerId}` and the returned `imageKey`.
+      security:
+        - MerchantAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [contentType]
+              properties:
+                contentType: { $ref: '#/components/schemas/ImageContentType' }
+      responses:
+        '201':
+          description: The presigned upload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImageUpload' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/redemptions:
+    get:
+      tags: [merchant]
+      operationId: listMerchantRedemptions
+      summary: The shop's redemptions, newest first
+      security:
+        - MerchantAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of redemptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 20
+                    items: { $ref: '#/components/schemas/MerchantRedemption' }
+                  nextCursor: { $ref: '#/components/schemas/NextCursor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [merchant]
+      operationId: recordRedemption
+      summary: Record one redemption from one scanned QR value
+      security:
+        - MerchantAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qrValue]
+              properties:
+                qrValue: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: The recorded redemption
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MerchantRedemption' }
+        '400':
+          description: The QR value is malformed or its signature is wrong (`invalid_qr`), or the body is invalid
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The consumer account no longer exists (`consumer_not_found`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: The offer is not an active offer of this shop (`offer_unavailable`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/merchants:
+    post:
+      tags: [admin]
+      operationId: createMerchant
+      summary: Create a merchant account and shop
+      description: Emails a temporary password to `email`. Called with SigV4 by `scripts/admin-create-merchant.sh`.
+      security:
+        - AdminSigV4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MerchantCreate' }
+      responses:
+        '201':
+          description: The merchant was created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [merchantId]
+                properties:
+                  merchantId: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: The request is not signed with administrator AWS credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GatewayError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    ConsumerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from the consumer Cognito user pool.
+    MerchantAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from the merchant Cognito user pool.
+    AdminSigV4:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: AWS Signature Version 4 with administrator IAM credentials (for example `awscurl --service execute-api`).
+
+  parameters:
+    MerchantId:
+      name: merchantId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    OfferId:
+      name: offerId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `nextCursor` from the previous page.
+      schema: { type: string, minLength: 1 }
+
+  responses:
+    BadRequest:
+      description: The request failed validation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing token, or a token from the wrong user pool
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/GatewayError' }
+    NotFound:
+      description: The resource does not exist
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: The resource already exists
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code, for example `validation_error`, `not_found`, `invalid_qr`.
+        message:
+          type: string
+
+    GatewayError:
+      type: object
+      description: Body that API Gateway returns when it rejects a request before any handler runs.
+      required: [message]
+      properties:
+        message: { type: string }
+
+    NextCursor:
+      type: string
+      description: Present only when there is another page.
+
+    Category:
+      type: object
+      required: [categoryId, name]
+      properties:
+        categoryId: { type: string, examples: [coffee] }
+        name: { type: string, examples: [Coffee] }
+
+    ShopType:
+      type: string
+      enum: [cafe, restaurant, bakery, bar, retail, beauty, services, other]
+
+    State:
+      type: string
+      enum: [ACT, NSW, NT, QLD, SA, TAS, VIC, WA]
+
+    Postcode:
+      type: string
+      pattern: '^[0-9]{4}$'
+
+    Locality:
+      type: object
+      required: [suburb, state, postcode, lat, lng]
+      properties:
+        suburb: { type: string }
+        state: { $ref: '#/components/schemas/State' }
+        postcode: { $ref: '#/components/schemas/Postcode' }
+        lat: { type: number }
+        lng: { type: number }
+
+    Merchant:
+      type: object
+      required: [merchantId, name, shopType, street, suburb, state, postcode, lat, lng]
+      properties:
+        merchantId: { type: string }
+        name: { type: string }
+        shopType: { $ref: '#/components/schemas/ShopType' }
+        street: { type: string }
+        suburb: { type: string }
+        state: { $ref: '#/components/schemas/State' }
+        postcode: { $ref: '#/components/schemas/Postcode' }
+        lat: { type: number }
+        lng: { type: number }
+
+    MerchantWithOffers:
+      allOf:
+        - $ref: '#/components/schemas/Merchant'
+        - type: object
+          required: [offers]
+          properties:
+            offers:
+              type: array
+              description: Active offers only.
+              items: { $ref: '#/components/schemas/Offer' }
+
+    DiscoveryMerchant:
+      allOf:
+        - $ref: '#/components/schemas/MerchantWithOffers'
+        - type: object
+          required: [distanceMetres]
+          properties:
+            distanceMetres: { type: integer, minimum: 0 }
+
+    MerchantCreate:
+      type: object
+      additionalProperties: false
+      required: [name, shopType, street, suburb, state, postcode, lat, lng, email]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        shopType: { $ref: '#/components/schemas/ShopType' }
+        street: { type: string, minLength: 1, maxLength: 120 }
+        suburb: { type: string, minLength: 1, maxLength: 60 }
+        state: { $ref: '#/components/schemas/State' }
+        postcode: { $ref: '#/components/schemas/Postcode' }
+        lat:
+          type: number
+          description: Inside Australia's bounding box.
+          minimum: -44
+          maximum: -9
+        lng:
+          type: number
+          description: Inside Australia's bounding box.
+          minimum: 112
+          maximum: 154
+        email: { type: string, format: email }
+
+    PercentOff:
+      type: integer
+      minimum: 1
+      maximum: 99
+
+    PriceCents:
+      type: integer
+      minimum: 1
+      maximum: 1000000
+
+    ProductName:
+      type: string
+      minLength: 1
+      maxLength: 80
+
+    Offer:
+      type: object
+      required:
+        - offerId
+        - merchantId
+        - productName
+        - categoryId
+        - percentOff
+        - originalPriceCents
+        - discountedPriceCents
+        - description
+        - imageUrl
+        - active
+        - createdAt
+        - updatedAt
+      properties:
+        offerId: { type: string }
+        merchantId: { type: string }
+        productName: { $ref: '#/components/schemas/ProductName' }
+        categoryId: { type: string }
+        percentOff: { $ref: '#/components/schemas/PercentOff' }
+        originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
+        discountedPriceCents:
+          type: integer
+          minimum: 0
+          description: originalPriceCents × (100 − percentOff) / 100, rounded half up.
+        description:
+          type: [string, 'null']
+          maxLength: 200
+        imageUrl:
+          type: [string, 'null']
+          format: uri
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    OfferCreate:
+      type: object
+      additionalProperties: false
+      required: [productName, categoryId, percentOff, originalPriceCents]
+      properties:
+        productName: { $ref: '#/components/schemas/ProductName' }
+        categoryId: { type: string, description: 'A `categoryId` from `GET /categories`.' }
+        percentOff: { $ref: '#/components/schemas/PercentOff' }
+        originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
+        description: { type: string, maxLength: 200 }
+        active: { type: boolean, default: true }
+
+    OfferUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        productName: { $ref: '#/components/schemas/ProductName' }
+        categoryId: { type: string }
+        percentOff: { $ref: '#/components/schemas/PercentOff' }
+        originalPriceCents: { $ref: '#/components/schemas/PriceCents' }
+        description:
+          type: [string, 'null']
+          maxLength: 200
+        active: { type: boolean }
+        imageKey:
+          type: [string, 'null']
+          description: A key from `POST /merchant/offers/{offerId}/image`, or null to remove the image.
+
+    ImageContentType:
+      type: string
+      enum: [image/jpeg, image/png, image/webp]
+
+    ImageUpload:
+      type: object
+      required: [imageKey, upload, expiresAt]
+      properties:
+        imageKey: { type: string, examples: ['offers/m1/o1/3f2a.jpg'] }
+        upload:
+          type: object
+          required: [url, fields]
+          properties:
+            url: { type: string, format: uri }
+            fields:
+              type: object
+              additionalProperties: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    ConsumerProfile:
+      type: object
+      required: [userId, email, displayName]
+      properties:
+        userId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: [string, 'null'] }
+
+    RedemptionBase:
+      type: object
+      required:
+        - redemptionId
+        - redeemedAt
+        - merchantId
+        - offerId
+        - productName
+        - categoryId
+        - percentOff
+        - originalPriceCents
+        - discountedPriceCents
+      properties:
+        redemptionId: { type: string }
+        redeemedAt: { type: string, format: date-time }
+        merchantId: { type: string }
+        offerId: { type: string }
+        productName: { type: string }
+        categoryId: { type: string }
+        percentOff: { type: integer }
+        originalPriceCents: { type: integer }
+        discountedPriceCents: { type: integer }
+
+    ConsumerRedemption:
+      allOf:
+        - $ref: '#/components/schemas/RedemptionBase'
+        - type: object
+          required: [merchantName]
+          properties:
+            merchantName: { type: string }
+
+    MerchantRedemption:
+      description: Never contains the consumer's email or contact details.
+      allOf:
+        - $ref: '#/components/schemas/RedemptionBase'
+        - type: object
+          required: [displayName]
+          properties:
+            displayName:
+              type: [string, 'null']
+              description: Null when the consumer has no display name or has deleted their account.
