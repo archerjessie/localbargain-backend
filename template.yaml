@@ -488,9 +488,10 @@ Resources:
           QR_KEY: ''
       Policies:
         - Statement:
-            # AdminGetUser or ListUsers finds the consumer by sub (federated usernames differ from the sub), then AdminDeleteUser removes it.
+            # AdminGetUser or ListUsers finds the consumer by sub (federated usernames differ from the sub). DELETE /me then
+            # disables the account, anonymises its redemptions, and removes it with AdminDeleteUser.
             - Effect: Allow
-              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers, cognito-idp:AdminDeleteUser]
+              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers, cognito-idp:AdminDisableUser, cognito-idp:AdminDeleteUser]
               Resource: !GetAtt ConsumerUserPool.Arn
             # GetItem checks an offer before issuing a QR value. Query reads history from GSI1.
             - Effect: Allow

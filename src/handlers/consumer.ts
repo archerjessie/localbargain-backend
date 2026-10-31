@@ -18,11 +18,13 @@ export const handler = router({
     return json(200, { userId: sub, email, displayName: displayName ?? null });
   },
 
-  // Database first, then Cognito (design D5): a failure part-way leaves an account that can retry, never personal
-  // data with no account. A retry finds nothing to anonymise and deletes the user.
+  // Design D5 order, plus a disable first: a disabled consumer counts as gone, so no scan can record a new linked
+  // redemption while the old ones are anonymised. A failure part-way leaves an account that can retry with its still-valid
+  // token, never personal data with no account. A retry finds nothing left to anonymise and deletes the user.
   'DELETE /me': async (event) => {
     const caller = getCaller(event, 'consumer');
     if (!caller.ok) return caller.response;
+    await identity().disableConsumer(caller.caller.sub);
     await anonymiseConsumer(caller.caller.sub);
     await identity().deleteConsumer(caller.caller.sub);
     return noContent();
