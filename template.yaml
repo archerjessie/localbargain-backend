@@ -37,6 +37,12 @@ Parameters:
     Default: ''
     NoEcho: true
 
+  EnableSmokeTestAuth:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Allow ADMIN_USER_PASSWORD_AUTH on both app clients, so an operator with IAM credentials can get tokens from the CLI for the smoke test (task 8.2). Turn it off again afterwards.
+
 Rules:
   GoogleAllOrNothing:
     Assertions:
@@ -60,6 +66,7 @@ Rules:
         AssertDescription: Set all four Apple parameters, or none.
 
 Conditions:
+  SmokeTestAuth: !Equals [!Ref EnableSmokeTestAuth, 'true']
   HasGoogle: !And
     - !Not [!Equals [!Ref GoogleClientId, '']]
     - !Not [!Equals [!Ref GoogleClientSecret, '']]
@@ -273,9 +280,59 @@ Resources:
         - COGNITO
         - !If [HasGoogle, !Ref GoogleIdentityProvider, !Ref AWS::NoValue]
         - !If [HasApple, !Ref AppleIdentityProvider, !Ref AWS::NoValue]
-      # Consumers sign in through the hosted UI only (design D3). ADMIN_USER_PASSWORD_AUTH needs IAM credentials,
-      # so only operator smoke tests (task 8.2) can use it.
-      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      # Consumers sign in through the hosted UI only (design D3).
+      ExplicitAuthFlows: !If
+        - SmokeTestAuth
+        - [ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+        - [ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+
+  # Merchant accounts: created by an admin only, one per shop, email as the username (design D3).
+  MerchantUserPool:
+    Type: AWS::Cognito::UserPool
+    # A replacement would delete every merchant account, and merchantId is the pool sub. sam delete still removes it.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-merchants'
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        # No self-signup. AdminCreateUser emails a temporary password, and the first sign-in must set a new one.
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: Your LocalBargain merchant account
+          EmailMessage: 'Your LocalBargain merchant account is ready. Sign in to the merchant app with {username} and the temporary password {####}. You will be asked to choose a new password.'
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - { Name: verified_email, Priority: 1 }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+
+  MerchantAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref MerchantUserPool
+      ClientName: merchant-app
+      GenerateSecret: false
+      # SRP keeps the password off the wire.
+      ExplicitAuthFlows: !If
+        - SmokeTestAuth
+        - [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+        - [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      # The login email is set by the admin. Leaving email out of WriteAttributes stops a merchant changing it.
+      WriteAttributes: [given_name]
+      SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
 
@@ -404,8 +461,14 @@ Resources:
       Handler: admin.handler
       LoggingConfig:
         LogGroup: !Ref AdminLogGroup
+      Environment:
+        Variables:
+          MERCHANT_USER_POOL_ID: !Ref MerchantUserPool
       Policies:
         - Statement:
+            - Effect: Allow
+              Action: [cognito-idp:AdminCreateUser, cognito-idp:AdminDeleteUser]
+              Resource: !GetAtt MerchantUserPool.Arn
             - Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt Table.Arn
@@ -432,6 +495,10 @@ Resources:
       RetentionInDays: 14
 
 Outputs:
+  MerchantUserPoolId:
+    Value: !Ref MerchantUserPool
+  MerchantAppClientId:
+    Value: !Ref MerchantAppClient
   ConsumerUserPoolId:
     Value: !Ref ConsumerUserPool
   ConsumerAppClientId:
