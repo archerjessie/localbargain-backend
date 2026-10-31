@@ -1,6 +1,8 @@
-import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import { DeleteCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import type { Redemption } from '../domain/types.js';
 import { dynamoClient, tableName } from './clients.js';
+import { offerKey, redemptionItem } from './items.js';
 
 const UPDATES_AT_ONCE = 25;
 
@@ -41,4 +43,38 @@ async function unlink(PK: unknown, SK: unknown) {
   } catch (error) {
     if (!(error instanceof ConditionalCheckFailedException)) throw error;
   }
+}
+
+export class OfferUnavailableError extends Error {}
+
+// One transaction with a check that the offer is still active, so an offer deactivated or deleted while the scan was
+// in flight is never redeemed (spec: "Offer no longer usable").
+export async function recordRedemption(redemption: Redemption): Promise<void> {
+  try {
+    await dynamoClient().send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            ConditionCheck: {
+              TableName: tableName(),
+              Key: offerKey(redemption.merchantId, redemption.offerId),
+              ConditionExpression: 'active = :active',
+              ExpressionAttributeValues: { ':active': true },
+            },
+          },
+          { Put: { TableName: tableName(), Item: redemptionItem(redemption) } },
+        ],
+      }),
+    );
+  } catch (error) {
+    if (error instanceof TransactionCanceledException && error.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed') {
+      throw new OfferUnavailableError(redemption.offerId);
+    }
+    throw error;
+  }
+}
+
+export async function removeRedemption(redemption: Redemption): Promise<void> {
+  const { PK, SK } = redemptionItem(redemption);
+  await dynamoClient().send(new DeleteCommand({ TableName: tableName(), Key: { PK, SK } }));
 }
