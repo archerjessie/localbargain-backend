@@ -1,6 +1,8 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import type { Redemption } from '../domain/types.js';
 import { dynamoClient, tableName } from './clients.js';
+import { redemptionItem } from './items.js';
 
 const UPDATES_AT_ONCE = 25;
 
@@ -41,4 +43,10 @@ async function unlink(PK: unknown, SK: unknown) {
   } catch (error) {
     if (!(error instanceof ConditionalCheckFailedException)) throw error;
   }
+}
+
+export async function putRedemption(redemption: Redemption): Promise<void> {
+  await dynamoClient().send(
+    new PutCommand({ TableName: tableName(), Item: redemptionItem(redemption), ConditionExpression: 'attribute_not_exists(PK)' }),
+  );
 }

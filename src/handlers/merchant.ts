@@ -4,12 +4,17 @@ import { imageBaseUrl } from '../data/clients.js';
 import { createImageUpload, deleteImage, imageExists, imageKeyPrefix } from '../data/images.js';
 import { getMerchantProfile, merchantProfileExists } from '../data/merchants.js';
 import { deleteOffer, getOffer, listOffers, OfferChangedError, putOffer } from '../data/offers.js';
+import { qrKey } from '../data/qrKey.js';
+import { putRedemption } from '../data/redemptions.js';
 import { errorResponse } from '../domain/errors.js';
+import { verifyQr } from '../domain/qr.js';
 import { json, noContent } from '../domain/responses.js';
+import { snapshotRedemption } from '../domain/snapshot.js';
 import type { Offer } from '../domain/types.js';
-import { imageUploadRequest, offerCreate, offerUpdate, parseJsonBody } from '../domain/validation.js';
-import { merchantView, offerView } from '../domain/views.js';
+import { imageUploadRequest, offerCreate, offerUpdate, parseJsonBody, redemptionCreate } from '../domain/validation.js';
+import { merchantRedemptionView, merchantView, offerView } from '../domain/views.js';
 import { getCaller } from '../identity/caller.js';
+import { identity } from '../identity/identity.js';
 import { router } from './router.js';
 
 const offerNotFound = () => errorResponse(404, 'not_found', 'Offer not found');
@@ -106,5 +111,29 @@ export const handler = router({
     const offer = await getOffer(caller.caller.sub, event.pathParameters?.offerId ?? '');
     if (!offer) return offerNotFound();
     return json(201, await createImageUpload(offer.merchantId, offer.offerId, body.data.contentType));
+  },
+
+  // Design D10 order: signature (400), then the offer under this shop (422), then the consumer (404), then one write.
+  'POST /merchant/redemptions': async (event) => {
+    const caller = getCaller(event, 'merchant');
+    if (!caller.ok) return caller.response;
+    const body = parseJsonBody(redemptionCreate, event.body, event.isBase64Encoded);
+    if (!body.ok) return body.response;
+    const scanned = verifyQr(await qrKey(), body.data.qrValue);
+    if (!scanned) return errorResponse(400, 'invalid_qr', 'The QR value is malformed or its signature is wrong');
+    // Looking in the scanning shop's own partition covers foreign, deleted, and deactivated offers in one check.
+    const [offer, merchant] = await Promise.all([getOffer(caller.caller.sub, scanned.offerId), getMerchantProfile(caller.caller.sub)]);
+    if (!offer?.active || !merchant) return errorResponse(422, 'offer_unavailable', 'This offer is not an active offer of this shop');
+    const consumer = await identity().getConsumer(scanned.sub);
+    if (!consumer) return errorResponse(404, 'consumer_not_found', 'The consumer account no longer exists');
+    const redemption = snapshotRedemption({
+      redemptionId: randomUUID(),
+      redeemedAt: new Date().toISOString(),
+      merchant,
+      offer,
+      consumer: { userId: consumer.sub, ...(consumer.displayName ? { displayName: consumer.displayName } : {}) },
+    });
+    await putRedemption(redemption);
+    return json(201, merchantRedemptionView(redemption));
   },
 });
