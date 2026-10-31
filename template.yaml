@@ -327,8 +327,10 @@ Resources:
           RequireNumbers: true
           RequireSymbols: false
           TemporaryPasswordValidityDays: 7
+      # Not required: Cognito makes a client able to write every required attribute, and merchants must not change their
+      # login email. AdminCreateUser always sets it (merchantCreate requires email), and there is no self sign-up.
       Schema:
-        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+        - { Name: email, AttributeDataType: String, Required: false, Mutable: true }
 
   MerchantAppClient:
     Type: AWS::Cognito::UserPoolClient
