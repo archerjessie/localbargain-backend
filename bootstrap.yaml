@@ -83,7 +83,7 @@ Resources:
                 Resource: !Sub 'arn:aws:s3:::localbargain-artifacts-${AWS::AccountId}-${AWS::Region}/*'
               # These have generated IDs, not names, so they cannot be scoped by name.
               - Effect: Allow
-                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE, apigateway:TagResource, apigateway:UntagResource]
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE]
                 Resource:
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis'
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/*'
