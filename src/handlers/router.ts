@@ -1,5 +1,6 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { errorResponse, type JsonResponse } from '../domain/errors.js';
+import { errorResponse } from '../domain/errors.js';
+import type { JsonResponse } from '../domain/responses.js';
 
 export type Route = (event: APIGatewayProxyEventV2) => Promise<JsonResponse>;
 
