@@ -16,7 +16,7 @@ command -v awscurl >/dev/null || { echo "awscurl is not installed (pip install a
 [[ -f "$body_file" ]] || { echo "no such file: $body_file" >&2; exit 1; }
 
 api_url="$(aws cloudformation describe-stacks --region "$region" --stack-name "$stack" \
-  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)"
+  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text | tr -d '')"
 [[ -n "$api_url" && "$api_url" != "None" ]] || { echo "stack $stack has no ApiUrl output" >&2; exit 1; }
 
 # --fail-with-body exits non-zero on 4xx/5xx and still prints the {code, message} body.
