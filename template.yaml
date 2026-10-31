@@ -8,6 +8,66 @@ Parameters:
     Default: /localbargain/dev/qr-key
     AllowedPattern: '^/[A-Za-z0-9/_.-]+$'
     Description: SSM SecureString holding the base64 encoding of the 32-byte HMAC key for lb1 QR values (design D10). Create it once, see README.
+  ConsumerCallbackUrl:
+    Type: String
+    Default: localbargain://auth/callback
+    Description: Redirect URI the consumer app registers for the hosted UI (authorization code + PKCE).
+  ConsumerLogoutUrl:
+    Type: String
+    Default: localbargain://auth/logout
+  # Federation is optional (design D3). Leave these empty and the stack still deploys with email sign-in only.
+  GoogleClientId:
+    Type: String
+    Default: ''
+  GoogleClientSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+  AppleServicesId:
+    Type: String
+    Default: ''
+  AppleTeamId:
+    Type: String
+    Default: ''
+  AppleKeyId:
+    Type: String
+    Default: ''
+  ApplePrivateKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+
+Rules:
+  GoogleAllOrNothing:
+    Assertions:
+      - Assert: !Or
+          - !And [!Equals [!Ref GoogleClientId, ''], !Equals [!Ref GoogleClientSecret, '']]
+          - !And [!Not [!Equals [!Ref GoogleClientId, '']], !Not [!Equals [!Ref GoogleClientSecret, '']]]
+        AssertDescription: Set both GoogleClientId and GoogleClientSecret, or neither.
+  AppleAllOrNothing:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Equals [!Ref AppleServicesId, '']
+            - !Equals [!Ref AppleTeamId, '']
+            - !Equals [!Ref AppleKeyId, '']
+            - !Equals [!Ref ApplePrivateKey, '']
+          - !And
+            - !Not [!Equals [!Ref AppleServicesId, '']]
+            - !Not [!Equals [!Ref AppleTeamId, '']]
+            - !Not [!Equals [!Ref AppleKeyId, '']]
+            - !Not [!Equals [!Ref ApplePrivateKey, '']]
+        AssertDescription: Set all four Apple parameters, or none.
+
+Conditions:
+  HasGoogle: !And
+    - !Not [!Equals [!Ref GoogleClientId, '']]
+    - !Not [!Equals [!Ref GoogleClientSecret, '']]
+  HasApple: !And
+    - !Not [!Equals [!Ref AppleServicesId, '']]
+    - !Not [!Equals [!Ref AppleTeamId, '']]
+    - !Not [!Equals [!Ref AppleKeyId, '']]
+    - !Not [!Equals [!Ref ApplePrivateKey, '']]
 
 Globals:
   Function:
@@ -121,6 +181,104 @@ Resources:
             Condition:
               Bool: { aws:SecureTransport: 'false' }
 
+  # Consumer accounts: self-signup with a verified email, plus optional Google and Apple (design D3, D4).
+  ConsumerUserPool:
+    Type: AWS::Cognito::UserPool
+    # A replacement would delete every consumer account and orphan redemption userIds. sam delete still removes it.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-consumers'
+      # Lite covers the classic hosted UI and social sign-in. New pools default to Essentials, which costs more.
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - { Name: verified_email, Priority: 1 }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+        - { Name: given_name, AttributeDataType: String, Required: false, Mutable: true }
+
+  ConsumerUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref ConsumerUserPool
+      # Hosted UI prefixes are global and lowercase. The first block of the stack's UUID makes one per stack.
+      Domain: !Sub
+        - 'localbargain-${StackUuidPrefix}'
+        - StackUuidPrefix: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]
+      ManagedLoginVersion: 1
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogle
+    Properties:
+      UserPoolId: !Ref ConsumerUserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: openid email profile
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+        given_name: given_name
+
+  AppleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasApple
+    Properties:
+      UserPoolId: !Ref ConsumerUserPool
+      ProviderName: SignInWithApple
+      ProviderType: SignInWithApple
+      ProviderDetails:
+        client_id: !Ref AppleServicesId
+        team_id: !Ref AppleTeamId
+        key_id: !Ref AppleKeyId
+        private_key: !Ref ApplePrivateKey
+        authorize_scopes: email name
+      # Apple sends the name only on the first authorization, so given_name can be missing. displayName is then null.
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+        given_name: firstName
+
+  ConsumerAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref ConsumerUserPool
+      ClientName: consumer-app
+      # Public client: the app cannot keep a secret, so it uses authorization code + PKCE.
+      # Cognito does not require code_challenge, so the consumer app must always send it (redirect is a custom scheme).
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      # aws.cognito.signin.user.admin lets the app set given_name (the display name) after an email sign-up.
+      AllowedOAuthScopes: [openid, email, profile, aws.cognito.signin.user.admin]
+      CallbackURLs: [!Ref ConsumerCallbackUrl]
+      LogoutURLs: [!Ref ConsumerLogoutUrl]
+      # Referencing the providers (not DependsOn) makes the client wait for them only when they exist.
+      SupportedIdentityProviders:
+        - COGNITO
+        - !If [HasGoogle, !Ref GoogleIdentityProvider, !Ref AWS::NoValue]
+        - !If [HasApple, !Ref AppleIdentityProvider, !Ref AWS::NoValue]
+      # Consumers sign in through the hosted UI only (design D3). ADMIN_USER_PASSWORD_AUTH needs IAM credentials,
+      # so only operator smoke tests (task 8.2) can use it.
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+
   # Four functions grouped by audience (design D2). Each gets only the access its routes need.
   DiscoveryFunction:
     Type: AWS::Serverless::Function
@@ -168,8 +326,12 @@ Resources:
       Environment:
         Variables:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
+          CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
       Policies:
         - Statement:
+            - Effect: Allow
+              Action: cognito-idp:AdminDeleteUser
+              Resource: !GetAtt ConsumerUserPool.Arn
             # GetItem checks an offer before issuing a QR value. Query reads history from GSI1.
             - Effect: Allow
               Action: dynamodb:GetItem
@@ -208,6 +370,7 @@ Resources:
         Variables:
           QR_KEY_PARAMETER: !Ref QrKeyParameterName
           IMAGE_BUCKET: !Ref ImageBucket
+          CONSUMER_USER_POOL_ID: !Ref ConsumerUserPool
           IMAGE_BASE_URL: !Sub 'https://${ImageDistribution.DomainName}/'
       Policies:
         - Statement:
@@ -217,6 +380,9 @@ Resources:
             - Effect: Allow
               Action: ssm:GetParameter
               Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${QrKeyParameterName}'
+            - Effect: Allow
+              Action: cognito-idp:AdminGetUser
+              Resource: !GetAtt ConsumerUserPool.Arn
             # PutObject signs the presigned POST, GetObject backs HeadObject. The merchant-ID prefix is checked in code.
             - Effect: Allow
               Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
@@ -266,6 +432,12 @@ Resources:
       RetentionInDays: 14
 
 Outputs:
+  ConsumerUserPoolId:
+    Value: !Ref ConsumerUserPool
+  ConsumerAppClientId:
+    Value: !Ref ConsumerAppClient
+  ConsumerHostedUiDomain:
+    Value: !Sub 'https://${ConsumerUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
   TableName:
     Value: !Ref Table
   ImageBucketName:
