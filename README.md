@@ -2,6 +2,28 @@
 
 Backend API for LocalBargain. The contract is [`openapi.yaml`](openapi.yaml).
 
+## Infrastructure
+
+The stack is defined in `template.yaml` (AWS SAM) and deployed to `ap-southeast-2`.
+
+### One-time setup: the QR signing key
+
+QR values are signed with a 32-byte HMAC key kept in SSM Parameter Store as a `SecureString`. This uses the standard tier and the AWS-managed KMS key, so it has no monthly cost. Only the `consumer` and `merchant` functions can read it. Create it once per account before the first deploy:
+
+```sh
+aws ssm put-parameter \
+  --region ap-southeast-2 \
+  --name /localbargain/dev/qr-key \
+  --type SecureString \
+  --value "$(openssl rand -base64 32)"
+```
+
+Rotating the key invalidates every QR value already issued. The apps fetch a new value when a scan returns `invalid_qr`.
+
+### Product images and CloudFront
+
+Images live in a private S3 bucket that CloudFront reads through Origin Access Control. The distribution uses `PriceClass_All`, because Australia and New Zealand edge locations are only in that class. `PriceClass_100` and `PriceClass_200` leave them out, so Australian users would be served from Asia or the US. At test traffic the cost stays inside CloudFront's always-free tier: 1 TB of transfer and 10,000,000 requests per month.
+
 ## Data sources
 
 ### Localities (`src/reference/localities.json`)

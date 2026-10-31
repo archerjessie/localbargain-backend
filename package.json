@@ -20,7 +20,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && redocly lint openapi.yaml",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "build": "sam build",
+    "validate": "sam validate --lint"
   },
   "dependencies": {
     "zod": "^4.6.7"
