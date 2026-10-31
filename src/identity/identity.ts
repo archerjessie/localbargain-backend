@@ -1,6 +1,7 @@
 // Every Cognito call goes through this module, so local mode can swap in the fixture (design D9).
 import {
   AdminCreateUserCommand,
+  AdminGetUserCommand,
   AdminDeleteUserCommand,
   CognitoIdentityProviderClient,
   ListUsersCommand,
@@ -35,28 +36,37 @@ export function cognitoIdentity(
   client: CognitoIdentityProviderClient,
   pools: { consumerPoolId: string; merchantPoolId: string },
 ): Identity {
-  // Look up by sub, not username: a Google or Apple user's username (Google_123...) is not their sub.
-  async function findConsumer(sub: string) {
+  // A disabled user counts as gone, so their QR codes stop working.
+  async function findConsumer(sub: string): Promise<{ username: string; attributes: AttributeType[] } | null> {
     if (!SUB.test(sub)) return null;
+    try {
+      // A native user's username is their sub, so this one cheap call covers most consumers.
+      const user = await client.send(new AdminGetUserCommand({ UserPoolId: pools.consumerPoolId, Username: sub }));
+      return user.Enabled && user.Username ? { username: user.Username, attributes: user.UserAttributes ?? [] } : null;
+    } catch (error) {
+      if (!(error instanceof UserNotFoundException)) throw error;
+    }
+    // A Google or Apple user's username (Google_123...) is not their sub. ListUsers has a low quota, so it is only the fallback.
     const { Users } = await client.send(
-      new ListUsersCommand({ UserPoolId: pools.consumerPoolId, Filter: `sub = "${sub}"`, Limit: 1 }),
+      new ListUsersCommand({ UserPoolId: pools.consumerPoolId, Filter: `sub = "${sub}"`, Limit: 1, AttributesToGet: ['given_name'] }),
     );
-    return Users?.[0] ?? null;
+    const user = Users?.[0];
+    return user?.Enabled && user.Username ? { username: user.Username, attributes: user.Attributes ?? [] } : null;
   }
 
   return {
     async getConsumer(sub) {
       const user = await findConsumer(sub);
       if (!user) return null;
-      const displayName = attribute(user.Attributes, 'given_name');
+      const displayName = attribute(user.attributes, 'given_name');
       return { sub, ...(displayName ? { displayName } : {}) };
     },
 
     async deleteConsumer(sub) {
       const user = await findConsumer(sub);
       // Already deleted: DELETE /me is safe to retry (design D5).
-      if (!user?.Username) return;
-      await client.send(new AdminDeleteUserCommand({ UserPoolId: pools.consumerPoolId, Username: user.Username }));
+      if (!user) return;
+      await client.send(new AdminDeleteUserCommand({ UserPoolId: pools.consumerPoolId, Username: user.username }));
     },
 
     async createMerchant(email) {

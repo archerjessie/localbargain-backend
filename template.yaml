@@ -482,9 +482,9 @@ Resources:
           QR_KEY: ''
       Policies:
         - Statement:
-            # ListUsers finds a consumer by sub (federated usernames differ from the sub), then AdminDeleteUser removes it.
+            # AdminGetUser or ListUsers finds the consumer by sub (federated usernames differ from the sub), then AdminDeleteUser removes it.
             - Effect: Allow
-              Action: [cognito-idp:ListUsers, cognito-idp:AdminDeleteUser]
+              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers, cognito-idp:AdminDeleteUser]
               Resource: !GetAtt ConsumerUserPool.Arn
             # GetItem checks an offer before issuing a QR value. Query reads history from GSI1.
             - Effect: Allow
@@ -604,9 +604,10 @@ Resources:
             - Effect: Allow
               Action: ssm:GetParameter
               Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${QrKeyParameterName}'
-            # The scan looks the consumer up by sub with ListUsers, which also works for federated users (design D4).
+            # The scan looks the consumer up by sub: AdminGetUser for native users, ListUsers for federated ones (design D4).
+            # Accepted risk: IAM cannot limit ListUsers to one sub, so this role can list the consumer directory.
             - Effect: Allow
-              Action: cognito-idp:ListUsers
+              Action: [cognito-idp:AdminGetUser, cognito-idp:ListUsers]
               Resource: !GetAtt ConsumerUserPool.Arn
             # PutObject signs the presigned POST, GetObject backs HeadObject. The merchant-ID prefix is checked in code.
             - Effect: Allow

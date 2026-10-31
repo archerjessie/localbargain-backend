@@ -28,6 +28,11 @@ describe('getCaller in local mode', () => {
     });
   });
 
+  it('finds the header whatever its case, as sam local title-cases header names', () => {
+    const e = { headers: { 'X-Debug-Sub': 'local-consumer-2' }, requestContext: {} } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+    expect(getCaller(e, 'consumer', LOCAL)).toMatchObject({ ok: true, caller: { sub: 'local-consumer-2' } });
+  });
+
   it('answers 401 for a missing or unknown sub', () => {
     expect401(getCaller(event({}), 'consumer', LOCAL));
     expect401(getCaller(event({ header: 'local-consumer-99' }), 'consumer', LOCAL));

@@ -16,7 +16,9 @@ const unauthorized: CallerResult = { ok: false, response: json(401, { message: '
 
 export function getCaller(event: APIGatewayProxyEventV2WithJWTAuthorizer, pool: Pool, env: Env = process.env): CallerResult {
   if (isLocalMode(env)) {
-    const user = findFixtureUser(event.headers?.['x-debug-sub'] ?? '', pool);
+    // sam local title-cases header names (X-Debug-Sub), and deployed HTTP APIs lowercase them.
+    const header = Object.entries(event.headers ?? {}).find(([name]) => name.toLowerCase() === 'x-debug-sub')?.[1];
+    const user = findFixtureUser(header ?? '', pool);
     return user ? { ok: true, caller: { sub: user.sub, email: user.email, displayName: user.displayName } } : unauthorized;
   }
   // The authorizer already checked the signature, issuer, and audience, so the pool is right (design D3).

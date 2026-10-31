@@ -7,7 +7,7 @@ import { createTestTable } from './helpers.js';
 
 let drop: () => Promise<void>;
 beforeAll(async () => ({ drop } = await createTestTable()));
-afterAll(async () => drop());
+afterAll(async () => drop?.());
 
 describe('DynamoDB Local', () => {
   it('stores items and serves the sparse GSI2 discovery index', async () => {
@@ -25,11 +25,12 @@ describe('DynamoDB Local', () => {
 
 describe('MinIO image bucket', () => {
   const key = `offers/m1/o1/${randomUUID()}.png`;
-  afterAll(async () => void (await s3Client().send(new DeleteObjectCommand({ Bucket: 'localbargain-images', Key: key }))));
+  const bucket = process.env.IMAGE_BUCKET!;
+  afterAll(async () => void (await s3Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))));
 
   it('serves uploaded objects anonymously through IMAGE_BASE_URL', async () => {
     const body = Buffer.from('not really a png');
-    await s3Client().send(new PutObjectCommand({ Bucket: 'localbargain-images', Key: key, Body: body, ContentType: 'image/png' }));
+    await s3Client().send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: 'image/png' }));
     const response = await fetch(`${process.env.IMAGE_BASE_URL}${key}`);
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(body);

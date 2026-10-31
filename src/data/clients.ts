@@ -5,30 +5,30 @@ import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
 const env = (name: string) => process.env[name] || undefined;
 
+// Local emulators: DynamoDB Local accepts any credentials, MinIO takes its root user from local/env.json.
+const local = (endpoint: string, accessKeyId: string, secretAccessKey: string) => ({
+  endpoint,
+  region: 'ap-southeast-2',
+  credentials: { accessKeyId, secretAccessKey },
+});
+
 let dynamo: DynamoDBDocumentClient | undefined;
 let s3: S3Client | undefined;
 let s3Presign: S3Client | undefined;
 
 export function dynamoClient(): DynamoDBDocumentClient {
-  const endpoint = env('DYNAMODB_ENDPOINT');
-  dynamo ??= DynamoDBDocumentClient.from(
-    new DynamoDBClient(
-      // DynamoDB Local accepts any credentials, and sam local may have none to pass on.
-      endpoint ? { endpoint, region: 'ap-southeast-2', credentials: { accessKeyId: 'local', secretAccessKey: 'local' } } : {},
-    ),
-    { marshallOptions: { removeUndefinedValues: true } },
-  );
+  if (!dynamo) {
+    const endpoint = env('DYNAMODB_ENDPOINT');
+    dynamo = DynamoDBDocumentClient.from(new DynamoDBClient(endpoint ? local(endpoint, 'local', 'local') : {}), {
+      marshallOptions: { removeUndefinedValues: true },
+    });
+  }
   return dynamo;
 }
 
 function s3For(endpoint: string | undefined): S3Client {
   if (!endpoint) return new S3Client({});
-  return new S3Client({
-    endpoint,
-    region: 'ap-southeast-2',
-    forcePathStyle: true,
-    credentials: { accessKeyId: env('S3_ACCESS_KEY_ID') ?? '', secretAccessKey: env('S3_SECRET_ACCESS_KEY') ?? '' },
-  });
+  return new S3Client({ ...local(endpoint, env('S3_ACCESS_KEY_ID') ?? '', env('S3_SECRET_ACCESS_KEY') ?? ''), forcePathStyle: true });
 }
 
 // For HeadObject and DeleteObject. Locally this is MinIO on the Docker network.

@@ -1,5 +1,6 @@
 import {
   AdminCreateUserCommand,
+  AdminGetUserCommand,
   AdminDeleteUserCommand,
   ListUsersCommand,
   UsernameExistsException,
@@ -21,16 +22,32 @@ const googleUser = {
 };
 
 describe('cognitoIdentity', () => {
-  it('finds a consumer by sub, including a federated user whose username is not the sub', async () => {
-    const { client, send } = fakeClient(() => ({ Users: [googleUser] }));
+  const notFound = () => {
+    throw new UserNotFoundException({ message: 'gone', $metadata: {} });
+  };
+
+  it('finds a native consumer with AdminGetUser, whose username is the sub', async () => {
+    const { client, send } = fakeClient(() => ({ Username: 'sub-1', Enabled: true, UserAttributes: [{ Name: 'given_name', Value: 'Alex' }] }));
     expect(await cognitoIdentity(client, pools).getConsumer('sub-1')).toEqual({ sub: 'sub-1', displayName: 'Alex' });
-    const command = send.mock.calls[0]![0] as ListUsersCommand;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((send.mock.calls[0]![0] as AdminGetUserCommand).input).toEqual({ UserPoolId: 'consumer-pool', Username: 'sub-1' });
+  });
+
+  it('falls back to ListUsers by sub for a federated consumer, reading only given_name', async () => {
+    const { client, send } = fakeClient((command) => (command instanceof AdminGetUserCommand ? notFound() : { Users: [{ ...googleUser, Enabled: true }] }));
+    expect(await cognitoIdentity(client, pools).getConsumer('sub-1')).toEqual({ sub: 'sub-1', displayName: 'Alex' });
+    const command = send.mock.calls[1]![0] as ListUsersCommand;
     expect(command).toBeInstanceOf(ListUsersCommand);
-    expect(command.input).toMatchObject({ UserPoolId: 'consumer-pool', Filter: 'sub = "sub-1"', Limit: 1 });
+    expect(command.input).toEqual({ UserPoolId: 'consumer-pool', Filter: 'sub = "sub-1"', Limit: 1, AttributesToGet: ['given_name'] });
+  });
+
+  it('treats a disabled consumer as gone', async () => {
+    const { client } = fakeClient(() => ({ Username: 'sub-1', Enabled: false, UserAttributes: [] }));
+    expect(await cognitoIdentity(client, pools).getConsumer('sub-1')).toBeNull();
   });
 
   it('returns null for a consumer that no longer exists', async () => {
-    const { client } = fakeClient(() => ({ Users: [] }));
+    const { client } = fakeClient((command) => (command instanceof AdminGetUserCommand ? notFound() : { Users: [] }));
     expect(await cognitoIdentity(client, pools).getConsumer('gone')).toBeNull();
   });
 
@@ -41,13 +58,15 @@ describe('cognitoIdentity', () => {
   });
 
   it('deletes a consumer by its username, and treats an already-deleted consumer as done', async () => {
-    const { client, send } = fakeClient((command) => (command instanceof ListUsersCommand ? { Users: [googleUser] } : {}));
+    const { client, send } = fakeClient((command) =>
+      command instanceof AdminGetUserCommand ? notFound() : command instanceof ListUsersCommand ? { Users: [{ ...googleUser, Enabled: true }] } : {},
+    );
     await cognitoIdentity(client, pools).deleteConsumer('sub-1');
-    const del = send.mock.calls[1]![0] as AdminDeleteUserCommand;
+    const del = send.mock.calls[2]![0] as AdminDeleteUserCommand;
     expect(del).toBeInstanceOf(AdminDeleteUserCommand);
     expect(del.input).toEqual({ UserPoolId: 'consumer-pool', Username: 'Google_1234' });
 
-    const gone = fakeClient(() => ({ Users: [] }));
+    const gone = fakeClient((command) => (command instanceof AdminGetUserCommand ? notFound() : { Users: [] }));
     await expect(cognitoIdentity(gone.client, pools).deleteConsumer('sub-1')).resolves.toBeUndefined();
   });
 
