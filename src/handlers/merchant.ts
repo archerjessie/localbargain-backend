@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { imageBaseUrl } from '../data/clients.js';
 import { createImageUpload, deleteImage, imageExists, imageKeyPrefix } from '../data/images.js';
-import { InvalidCursorError, shopHistory } from '../data/history.js';
+import { shopHistory } from '../data/history.js';
 import { getMerchantProfile, merchantProfileExists } from '../data/merchants.js';
 import { deleteOffer, getOffer, listOffers, OfferChangedError, putOffer } from '../data/offers.js';
 import { qrKey } from '../data/qrKey.js';
@@ -12,10 +12,11 @@ import { verifyQr } from '../domain/qr.js';
 import { json, noContent } from '../domain/responses.js';
 import { snapshotRedemption } from '../domain/snapshot.js';
 import type { Offer } from '../domain/types.js';
-import { cursorQuery, imageUploadRequest, offerCreate, offerUpdate, parseJsonBody, parseRequest, redemptionCreate } from '../domain/validation.js';
+import { imageUploadRequest, offerCreate, offerUpdate, parseJsonBody, redemptionCreate } from '../domain/validation.js';
 import { merchantRedemptionView, merchantView, offerView } from '../domain/views.js';
 import { getCaller } from '../identity/caller.js';
 import { identity } from '../identity/identity.js';
+import { historyRoute } from './historyRoute.js';
 import { router } from './router.js';
 
 const offerNotFound = () => errorResponse(404, 'not_found', 'Offer not found');
@@ -114,19 +115,7 @@ export const handler = router({
     return json(201, await createImageUpload(offer.merchantId, offer.offerId, body.data.contentType));
   },
 
-  'GET /merchant/redemptions': async (event) => {
-    const caller = getCaller(event, 'merchant');
-    if (!caller.ok) return caller.response;
-    const query = parseRequest(cursorQuery, event.queryStringParameters ?? {});
-    if (!query.ok) return query.response;
-    try {
-      const { items, nextCursor } = await shopHistory(caller.caller.sub, query.data.cursor);
-      return json(200, { items: items.map(merchantRedemptionView), ...(nextCursor ? { nextCursor } : {}) });
-    } catch (error) {
-      if (error instanceof InvalidCursorError) return errorResponse(400, 'validation_error', 'cursor is not a valid cursor for this history');
-      throw error;
-    }
-  },
+  'GET /merchant/redemptions': historyRoute('merchant', shopHistory, merchantRedemptionView),
 
   // Design D10 order: signature (400), then the offer under this shop (422), then the consumer (404), then one write.
   'POST /merchant/redemptions': async (event) => {
