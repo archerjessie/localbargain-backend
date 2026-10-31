@@ -51,4 +51,15 @@ describe('lb1 QR values', () => {
   it.each(['', 'lb1', 'lb1.a.b', 'lb2.a.b.c', 'lb1..offer1.sig', 'lb1.a.b.c.d', 'not a qr'])('rejects malformed value %j', (value) => {
     expect(verifyQr(key, value)).toBeNull();
   });
+
+  it.each([['a.b', 'offer1'], ['a|b', 'offer1'], ['sub', 'o.1'], ['sub', 'o|1'], ['', 'offer1']])(
+    'refuses to sign sub %j with offerId %j',
+    (sub, offerId) => expect(() => signQr(key, sub, offerId)).toThrow(),
+  );
+
+  it('rejects a value whose fields contain the | separator', () => {
+    // Without this check, (a|b, c) and (a, b|c) would share one signed message.
+    const sig = signQr(key, 'a', 'c').split('.')[3];
+    expect(verifyQr(key, `lb1.a|b.c.${sig}`)).toBeNull();
+  });
 });

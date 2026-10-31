@@ -18,14 +18,16 @@ export function discover(
   const activeByMerchant = new Map<string, Offer[]>();
   for (const offer of offers) {
     if (!offer.active) continue;
-    activeByMerchant.set(offer.merchantId, [...(activeByMerchant.get(offer.merchantId) ?? []), offer]);
+    const list = activeByMerchant.get(offer.merchantId);
+    if (list) list.push(offer);
+    else activeByMerchant.set(offer.merchantId, [offer]);
   }
   return profiles
     .flatMap((merchant) => {
       const active = activeByMerchant.get(merchant.merchantId);
       if (!active) return [];
-      const distance = Math.round(distanceMetres(at, merchant));
-      return distance <= radiusMetres ? [{ merchant, offers: active, distanceMetres: distance }] : [];
+      const distance = distanceMetres(at, merchant);
+      return distance <= radiusMetres ? [{ merchant, offers: active, distanceMetres: Math.round(distance) }] : [];
     })
     .sort((a, b) => a.distanceMetres - b.distanceMetres)
     .slice(0, MAX_MERCHANTS);

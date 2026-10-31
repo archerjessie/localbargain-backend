@@ -46,4 +46,10 @@ describe('discover', () => {
     expect(result[0]!.merchant.merchantId).toBe('m149');
     expect(result[99]!.merchant.merchantId).toBe('m50');
   });
+
+  it('excludes a merchant just outside the radius even when its distance rounds down to the radius', () => {
+    const justOutside = { ...merchantAtKm('edge', 0), lat: centre.lat + 0.0449665 };
+    const result = discover([justOutside], [offer('edge', 'oe')], centre, 5000);
+    expect(result).toEqual([]);
+  });
 });

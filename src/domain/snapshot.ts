@@ -10,6 +10,7 @@ export function snapshotRedemption(input: {
   consumer: { userId: string; displayName?: string };
 }): Redemption {
   const { merchant, offer, consumer } = input;
+  if (offer.merchantId !== merchant.merchantId) throw new Error('offer does not belong to merchant');
   return {
     redemptionId: input.redemptionId,
     redeemedAt: input.redeemedAt,

@@ -19,6 +19,12 @@ describe('distanceMetres', () => {
     const north = { lat: melbourneGpo.lat + 0.009, lng: melbourneGpo.lng };
     expect(distanceMetres(melbourneGpo, north)).toBeCloseTo(1001, -1);
   });
+
+  it('stays finite for antipodal points', () => {
+    const d = distanceMetres({ lat: -37.8136, lng: 144.9631 }, { lat: 37.8136, lng: -35.0369 });
+    expect(Number.isFinite(d)).toBe(true);
+    expect(d).toBeCloseTo(Math.PI * 6_371_000, -3);
+  });
 });
 
 describe('geohash', () => {

@@ -37,4 +37,10 @@ describe('snapshotRedemption', () => {
     Object.assign(live, { productName: 'Latte', percentOff: 50, originalPriceCents: 600 });
     expect(r).toMatchObject({ productName: 'Flat white', percentOff: 15, originalPriceCents: 450, discountedPriceCents: 383 });
   });
+
+  it('refuses an offer that belongs to another merchant', () => {
+    expect(() => snapshotRedemption({
+      redemptionId: 'r1', redeemedAt: 't', merchant, offer: { ...offer, merchantId: 'local-merchant-2' }, consumer: { userId: 'u' },
+    })).toThrow();
+  });
 });
