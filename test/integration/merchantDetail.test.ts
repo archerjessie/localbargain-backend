@@ -39,4 +39,16 @@ describe('GET /merchants/{merchantId}', () => {
   it('answers 401 without a consumer', async () => {
     expect((await get('m1', {})).statusCode).toBe(401);
   });
+
+  it('answers 401 to a merchant caller (local mode, where the handler checks the pool)', async () => {
+    Object.assign(process.env, { LOCAL_AUTH: '1', AWS_SAM_LOCAL: 'true' });
+    try {
+      const event = apiEvent('GET /merchants/{merchantId}', { path: { merchantId: 'm1' } });
+      expect((await handler({ ...event, headers: { 'x-debug-sub': 'local-merchant-1' } })).statusCode).toBe(401);
+      expect((await handler({ ...event, headers: { 'x-debug-sub': 'local-consumer-1' } })).statusCode).toBe(200);
+    } finally {
+      delete process.env.LOCAL_AUTH;
+      delete process.env.AWS_SAM_LOCAL;
+    }
+  });
 });
