@@ -7,7 +7,7 @@ info:
 
     Every error from a handler uses the `Error` shape. API Gateway rejects some
     requests before any handler runs: 401 (JWT authorizer), 403 (IAM authorizer on
-    admin routes), and 429 (stage throttle). Those bodies are `GatewayError`
+    admin routes), and 429 (per-route throttle). Those bodies are `GatewayError`
     (`{"message": "..."}`, no `code`), because HTTP APIs cannot customise them.
 
     History pages hold a fixed 20 items. Pass `nextCursor` back as `cursor` to get
@@ -463,12 +463,18 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token from the consumer Cognito user pool.
+      description: |
+        The ID token (not the access token) from the consumer Cognito user pool.
+        Its claims supply the email and display name for `GET /me`. A token from
+        the merchant pool is rejected with 401. After an account is deleted, its
+        tokens stay valid until they expire (1 hour).
     MerchantAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token from the merchant Cognito user pool.
+      description: |
+        The ID token (not the access token) from the merchant Cognito user pool.
+        A token from the consumer pool is rejected with 401.
     AdminSigV4:
       type: apiKey
       in: header
@@ -520,7 +526,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     TooManyRequests:
-      description: The API-wide throttle (10 requests per second, burst 20) was exceeded. Retry later.
+      description: The per-route throttle (10 requests per second, burst 20) was exceeded. Retry later.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/GatewayError' }

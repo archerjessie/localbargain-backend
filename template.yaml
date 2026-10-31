@@ -340,23 +340,25 @@ Resources:
   Api:
     Type: AWS::Serverless::HttpApi
     Properties:
-      # Cost guard (design D8): caps the worst-case bill for the whole stage.
+      # Cost guard (design D8). HTTP APIs throttle per route, not per stage, so the worst case is
+      # 17 routes x 10 rps. A true stage-wide cap would need WAF, which costs money.
       DefaultRouteSettings:
         ThrottlingRateLimit: 10
         ThrottlingBurstLimit: 20
       Auth:
         EnableIamAuthorizer: true
+        # A route added without an Auth block is consumer-only, never public.
+        DefaultAuthorizer: ConsumerAuth
         Authorizers:
           ConsumerAuth:
             JwtConfiguration:
               issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${ConsumerUserPool}'
-              # Cognito access tokens carry client_id instead of aud. API Gateway checks either one.
+              # The apps send the ID token, whose aud is the app client ID. Its claims give GET /me the email and name (design D4).
               audience: [!Ref ConsumerAppClient]
             IdentitySource: $request.header.Authorization
           MerchantAuth:
             JwtConfiguration:
               issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${MerchantUserPool}'
-              # Cognito access tokens carry client_id instead of aud. API Gateway checks either one.
               audience: [!Ref MerchantAppClient]
             IdentitySource: $request.header.Authorization
 
